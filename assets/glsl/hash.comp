@@ -1,0 +1,29 @@
+#version 460
+#extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
+
+#include "sampling.glsl"
+
+layout(set=0, binding = 0) buffer Positions { vec4 p[]; } positions;
+layout(set=0, binding = 1) buffer Cells { uint32_t indices[]; } cells;
+
+layout(push_constant) uniform Constants {
+    uint numVertices;
+    float radius;
+} consts;
+
+void main() {
+
+    uint index = gl_GlobalInvocationID.z * gl_WorkGroupSize.x * gl_WorkGroupSize.y
+        + gl_GlobalInvocationID.y * gl_WorkGroupSize.x 
+        + gl_GlobalInvocationID.x;
+
+    if (index >= consts.numVertices) {
+        return;
+    }
+
+    ivec3 cellCoord = ivec3(positions.p[index].xyz / consts.radius);
+    uint spatial_hash = hash3d(cellCoord) % consts.numVertices;
+    cells.indices[index] = spatial_hash;
+}

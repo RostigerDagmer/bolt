@@ -1,0 +1,179 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
+
+#include "payload.glsl"
+
+layout(push_constant) uniform PushConstant {
+	int accum_start_frame;
+} push;
+
+struct ModelVertex {
+	vec4 pos;
+	vec4 color;
+	vec4 normal;
+	vec4 uv;
+};
+
+
+struct SceneInstance
+{
+	int  id;
+	int  texture_offset;
+	int numIndices;
+	int dynamic;
+	mat4 transform;
+	mat4 transform_it;
+};
+
+struct PhysicsProperties {
+    float mass;
+    vec3 velocity;
+    float radius;
+    vec3 acceleration;
+};
+
+
+layout(set = 1, binding = 0) uniform accelerationStructureEXT topLevelAS;
+layout(set = 1, binding = 3, scalar) buffer ScnDesc { SceneInstance i[]; } scnDesc;
+layout(set = 1, binding = 4, scalar) buffer volatile Vertices { ModelVertex v[]; } vertices[];
+layout(set = 1, binding = 5) buffer Indices { uint64_t i[]; } indices[];
+layout(set = 1, binding = 7, scalar) buffer volatile Properties { PhysicsProperties pp[]; } properties[];
+
+layout(location = 0) rayPayloadEXT PayloadCollision prd;
+
+void main() {
+	uint rayFlags   = gl_RayFlagsOpaqueEXT;
+	float tmin      = 0.001f;
+	float deltaT    = 0.001f;//1.0/60.0;
+	vec3 pixelColor = vec3(0);
+	vec3 gravity = vec3(0, -0.98f, 0); // TODO: make this a uniform
+	// get the index of the current invocation
+		// Object of this instance
+	uint idx1 = gl_LaunchIDEXT.x + gl_LaunchIDEXT.y * gl_LaunchSizeEXT.x;
+	uint objId = scnDesc.i[gl_LaunchIDEXT.z].id;
+	int dynamic = scnDesc.i[gl_LaunchIDEXT.z].dynamic;
+	// vertices[0].v[gl_LaunchIDEXT.x].color = vec4(float(dynamic), 0, 0, 1);
+	if (dynamic < 1 || idx1 >= scnDesc.i[gl_LaunchIDEXT.z].numIndices) {
+		return;
+	}
+	int iterations = 2;
+	ModelVertex v = vertices[objId].v[idx1];
+
+	// shoot rays from the model vertices in pp.velocity direction
+	vec4 origin = v.pos * scnDesc.i[gl_LaunchIDEXT.z].transform;
+
+	// get the current physics properties
+	PhysicsProperties pp = properties[objId].pp[idx1];
+
+	// get the current velocity
+	vec3 velocity = pp.velocity;
+	// get the current acceleration
+	vec3 acceleration = pp.acceleration + gravity / pp.mass;
+	// get the current mass
+	float mass = pp.mass;
+
+	// add the acceleration to the velocity
+	velocity += acceleration * deltaT;
+
+	// calculate length of the velocity (next position)
+	float dist = length(velocity);
+	// vec4 origin = vec4(1, 0, 0, 1);
+	// vec3 velocity = vec3(0, -0.1, 0);
+	// float dist = 0.1f;
+
+	// load up ray payload with current position direction of velocity and next position as max range
+	prd.origin = origin.xyz;
+	prd.velocity_direction = normalize(velocity);
+	prd.velocity_magnitude = dist;
+	prd.position_eps = pp.radius;
+	prd.mass = mass;
+	prd.normal = v.normal.xyz;
+	prd.energy_dissipated = 0.0;
+
+	traceRayEXT(topLevelAS, // acceleration structure
+		rayFlags,       // rayFlags
+		0xFF,           // cullMask
+		0,              // sbtRecordOffset
+		0,              // sbtRecordStride
+		0,              // missIndex
+		prd.origin,  	// ray origin
+		prd.position_eps, // ray min range
+		prd.velocity_direction, // ray direction
+		prd.velocity_magnitude, // ray max range
+		0               // payload (location = 0)
+		);
+	// write new positions back to model vertices
+	vertices[objId].v[idx1].pos = vec4(prd.next_position, 1.0f) * scnDesc.i[gl_LaunchIDEXT.z].transform_it; // * scnDesc.i[gl_LaunchIDEXT.z].transform_it;
+	//vertices[0].v[idx1].color = vec4(1.0, 0.0, 0.0, 1.0);
+	// write new velocities back to model vertices
+	properties[objId].pp[idx1].velocity = prd.velocity_direction * prd.velocity_magnitude;
+}
+
+
+
+// void preparePayload( inout Payload prd, vec3 origin, vec3 direction )
+// {
+// 	prd.hitValue    = vec3(0);
+// 	prd.depth       = 0;
+// 	prd.done        = 0;
+// 	prd.rayOrigin   = origin;
+// 	prd.rayDir      = direction;
+// 	prd.rayRange    = vec2(max(1.0f, length(origin.xyz)) * 1e-3f, 10000.0f);
+// 	prd.roughness   = 0;
+// }
+
+		// // get the current vertex
+		// ModelVertex vertex = vertices[instance.id].v[j];
+		// // get the current physics properties
+		// PhysicsProperties pp = properties[instance.id].pp[j];
+		// // get the current position
+		// vec3 position = vertex.position;
+		// // get the current velocity
+		// vec3 velocity = pp.velocity;
+		// // get the current acceleration
+		// vec3 acceleration = pp.acceleration;
+		// // get the current mass
+		// float mass = pp.mass;
+		// // get the current radius
+		// float radius = pp.radius;
+		// // get the current direction
+		// vec3 direction = normalize(velocity);
+		// // get the current speed
+		// float speed = length(velocity);
+		// // get the current acceleration
+		// float acceleration = length(acceleration);
+		// // get the current force
+		// float force = mass * acceleration;
+
+		// vec3 p_next = position + velocity;
+		// get the current momentum
+		// float momentum = mass * speed;
+		// // get the current energy
+		// float energy = 0.5f * mass * speed * speed;
+		// // get the current power
+		// float power = force * speed;
+		// // get the current impulse
+		// float impulse = force * 1.0f;
+		// // get the current work
+		// float work = force * speed;
+		// // get the current torque
+		// float torque = force * radius;
+		// // get the current angular momentum
+		// float angularMomentum = torque * 1.0f;
+		// // get the current angular velocity
+		// float angularVelocity = angularMomentum / (mass * radius * radius);
+		// // get the current angular acceleration
+		// float angularAcceleration = angularVelocity / 1.0f;
+		// // get the current angular force
+		// float angularForce = mass * radius * angularAcceleration;
+		// // get the current angular energy
+		// float angularEnergy = 0.5f * mass * radius * radius * angularVelocity * angularVelocity;
+		// // get the current angular power
+		// float angularPower = angularForce * angularVelocity;
+		// // get the current angular impulse
+		// float angularImpulse = angularForce * 1.0f;
+		// // get the current angular work
+		// float angularWork = angularForce * angular 

@@ -1,0 +1,41 @@
+[package]
+name = "bolt"
+version = "0.1.0"
+authors = ["Paul Hofbauer <paul.hofbauer3@gmail.com>"]
+edition = "2021"
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "load_to_buffer"
+harness = false
+
+[dependencies]
+winit = "0.27.5"
+image = "0.24.5"
+ash = "0.37.3+1.3.251"
+ash-window = "0.12.0"
+debug_tree = "0.4.0"
+bytemuck = {version = "1.14.0", features = ["derive"]}
+num = "0.4.0"
+circular-queue = "0.2.6"
+ahash = "0.8.2"
+#egui_winit_ash_vk_mem = "0.5.0"
+raw-window-handle = "0.5.0"
+gpu-allocator = "0.18.0"
+shaderc = { version = "0.8.1", features=["build-from-source"] }
+glam = { version = "0.22", features = ["serde"] }
+gltf = "1.0.0"
+num_cpus = "1.15.0"
+rayon = "1.6.1"
+safe-transmute = "0.11.2"
+serde_json = "1.0.89"
+serde = { version = "1.0.149", features = ["derive"] }
+structstruck = "0.3.0"
+url = "2.3.1"
+urlencoding = "2.1.2"
+log = "0.4.20"
+env_logger = "0.10.0"
+
+

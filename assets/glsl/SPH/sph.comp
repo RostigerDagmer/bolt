@@ -1,0 +1,165 @@
+#version 460
+#extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
+
+#include "common.glsl"
+
+// take in position, velocities, densities, pressures and cell index array from set 1
+layout(set = 0, binding = 0) uniform Scene {
+    mat4 mvp;
+    mat4 normal;
+    vec4 gravity;
+    vec4 boundsMin;
+    vec4 boundsMax;
+} scene;
+
+
+layout(set=1, binding = 0) buffer Positions { vec4 p[]; } positions;
+layout(set=1, binding = 1) buffer Velocities { vec4 v[]; } velocities;
+layout(set=1, binding = 2) buffer Densities { float d[]; } densities;
+layout(set=1, binding = 3) buffer Pressures { float p[]; } pressures;
+layout(set=1, binding = 4) buffer Cells { uint32_t indices[]; } cells;
+layout(set=1, binding = 5) buffer CellLookup { uint32_t table[]; } cellLookup;
+
+layout(push_constant) uniform Constants {
+    float mass;
+    float radius;
+    float stiffness;
+    float viscosity;
+    float restDensity;
+    float deltaTime;
+    uint numVertices;
+    float smoothingRadius;
+} consts;
+
+
+void boundaryCollision(uint index) {
+    vec4 pos = positions.p[index];
+    vec4 vel = velocities.v[index];
+    float radius = consts.radius;
+    float restitution = consts.stiffness;
+    float friction = consts.viscosity;
+    float dt = consts.deltaTime;
+    vec4 boundsMin = scene.boundsMin;
+    vec4 boundsMax = scene.boundsMax;
+    if (pos.x < boundsMin.x + radius) {
+        pos.x = boundsMin.x + radius;
+        vel.x = -vel.x * restitution;
+        vel.y = vel.y * (1.0 - friction);
+        vel.z = vel.z * (1.0 - friction);
+    }
+    if (pos.x > boundsMax.x - radius) {
+        pos.x = boundsMax.x - radius;
+        vel.x = -vel.x * restitution;
+        vel.y = vel.y * (1.0 - friction);
+        vel.z = vel.z * (1.0 - friction);
+    }
+    if (pos.y < boundsMin.y + radius) {
+        pos.y = boundsMin.y + radius;
+        vel.y = -vel.y * restitution;
+        vel.x = vel.x * (1.0 - friction);
+        vel.z = vel.z * (1.0 - friction);
+    }
+    if (pos.y > boundsMax.y - radius) {
+        pos.y = boundsMax.y - radius;
+        vel.y = -vel.y * restitution;
+        vel.x = vel.x * (1.0 - friction);
+        vel.z = vel.z * (1.0 - friction);
+    }
+    if (pos.z < boundsMin.z + radius) {
+        pos.z = boundsMin.z + radius;
+        vel.z = -vel.z * restitution;
+        vel.x = vel.x * (1.0 - friction);
+        vel.y = vel.y * (1.0 - friction);
+    }
+    if (pos.z > boundsMax.z - radius) {
+        pos.z = boundsMax.z - radius;
+        vel.z = -vel.z * restitution;
+        vel.x = vel.x * (1.0 - friction);
+        vel.y = vel.y * (1.0 - friction);
+    }
+    positions.p[index] = pos;
+    velocities.v[index] = vel;
+}
+
+void integrate(uint thisIndex, uint otherIndex) {
+    vec3 t_p = positions.p[thisIndex].xyz;
+    vec3 o_p = positions.p[otherIndex].xyz;
+    vec3 displacement = t_p - o_p;
+    float l_d = length(displacement);
+    if (l_d < consts.radius) {
+        float collision_force = length(velocities.v[thisIndex].xyz - velocities.v[otherIndex].xyz) * consts.mass;
+        velocities.v[thisIndex].xyz += reflect(velocities.v[thisIndex].xyz, displacement) * (collision_force / 2.0) * consts.stiffness;
+        velocities.v[otherIndex].xyz -= reflect(velocities.v[otherIndex].xyz, displacement) * (collision_force / 2.0) * consts.stiffness;
+        // positions.p[thisIndex].xyz -= (displacement * (l_d - consts.radius)) / 2.0;
+        // positions.p[otherIndex].xyz += (displacement * (l_d - consts.radius)) / 2.0;
+    }
+}
+
+void main() {
+
+    uint index = gl_GlobalInvocationID.z * gl_WorkGroupSize.x * gl_WorkGroupSize.y
+           + gl_GlobalInvocationID.y * gl_WorkGroupSize.x 
+           + gl_GlobalInvocationID.x;
+
+    if (index >= consts.numVertices) {
+        return;
+    }
+
+    // apply gravity
+    velocities.v[index].xyz += (scene.gravity * 0.01).xyz; //* consts.deltaTime;
+
+    // positions are hashed into cells at this point
+    // we need to find the neighbours of each particle
+    // we do this by finding the cell that each particle is in
+    // and then looking at the 26 cells around it
+    // we then iterate over the particles in those cells
+    // and check if they are within the smoothing radius
+    ivec3 cellCoord = ivec3(positions.p[index].xyz / consts.smoothingRadius);
+
+    // loop over all 27 cells
+
+    for (int i = 0; i < 27; i++) {
+        ivec3 offset = cellOffsets[i];
+        ivec3 neighbourCoord = cellCoord + offset;
+        uint spatial_hash = hash3d(neighbourCoord) % consts.numVertices;
+        uint cellIndex = cells.indices[spatial_hash];
+
+        // we could be starting in the middle of the cell array
+        // so we iterate in both directions
+
+        bvec2 cellBounariesReached = bvec2(false, false);
+        uint intracell_offset = 0;
+
+        while (!all(cellBounariesReached)) {
+            int lb = int(cellIndex) - int(intracell_offset);
+            uint ub = cellIndex + intracell_offset + 1;
+            if (lb < 0 || cells.indices[uint(lb)] != cellIndex) {
+                cellBounariesReached.x = true;
+            }
+            if (ub > consts.numVertices || cells.indices[ub] != cellIndex) {
+                cellBounariesReached.y = true;
+            }
+            
+            if (!cellBounariesReached.x) {
+                uint otherID = cellLookup.table[uint(lb)];
+                if (otherID != index && length(positions.p[otherID].xyz - positions.p[index].xyz) < consts.smoothingRadius) {
+                    integrate(index, otherID);
+                }
+            }
+            if (!cellBounariesReached.y) {
+                uint otherID = cellLookup.table[ub];
+                if (otherID != index && length(positions.p[otherID].xyz - positions.p[index].xyz) < consts.smoothingRadius) {
+                    integrate(index, otherID);
+                }
+            }
+            intracell_offset += 1;
+        }
+    }
+
+    boundaryCollision(index);
+
+    // update position
+    positions.p[index].xyz += velocities.v[index].xyz  * consts.deltaTime;
+}

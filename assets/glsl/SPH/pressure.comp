@@ -1,0 +1,93 @@
+#version 460
+#extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
+#include "common.glsl"
+
+// take in position, velocities, densities, pressures and cell index array from set 1
+layout(set = 0, binding = 0) uniform Scene {
+    mat4 mvp;
+    mat4 normal;
+    vec4 gravity;
+    vec4 boundsMin;
+    vec4 boundsMax;
+} scene;
+
+
+layout(set=1, binding = 0) buffer Positions { vec4 p[]; } positions;
+layout(set=1, binding = 1) buffer Velocities { vec4 v[]; } velocities;
+layout(set=1, binding = 2) buffer Densities { float d[]; } densities;
+layout(set=1, binding = 3) buffer Pressures { float p[]; } pressures;
+layout(set=1, binding = 4) buffer Cells { uint32_t indices[]; } cells;
+layout(set=1, binding = 5) buffer CellLookup { uint32_t table[]; } cellLookup;
+
+layout(push_constant) uniform Constants {
+    float mass;
+    float radius;
+    float stiffness;
+    float viscosity;
+    float restDensity;
+    float deltaTime;
+    uint numVertices;
+    float smoothingRadius;
+} consts;
+
+
+void integrate(uint thisIndex, uint otherIndex) {
+    float dist = length(positions.p[thisIndex] - positions.p[otherIndex]);
+    float influence = smoothingKernel(dist, consts.smoothingRadius);
+    // densities.d[thisIndex] += consts.mass * influence;
+    densities.d[thisIndex] = 1.0;
+}
+
+
+void main() {
+
+    uint index = gl_GlobalInvocationID.z * gl_WorkGroupSize.x * gl_WorkGroupSize.y
+        + gl_GlobalInvocationID.y * gl_WorkGroupSize.x 
+        + gl_GlobalInvocationID.x;
+
+    if (index >= consts.numVertices) {
+        return;
+    }
+
+
+    ivec3 cellCoord = ivec3(positions.p[index].xyz / consts.smoothingRadius);
+
+    // loop over all 27 cells
+
+    for (int i = 0; i < 27; i++) {
+        ivec3 offset = cellOffsets[i];
+        ivec3 neighbourCoord = cellCoord + offset;
+        uint spatial_hash = hash3d(neighbourCoord) % consts.numVertices;
+        uint cellIndex = cells.indices[spatial_hash];
+        bvec2 cellBounariesReached = bvec2(false, false);
+        uint intracell_offset = 0;
+
+        while (!all(cellBounariesReached)) {
+            int lb = int(cellIndex) - int(intracell_offset);
+            uint ub = cellIndex + intracell_offset + 1;
+            if (lb < 0 || cells.indices[uint(lb)] != cellIndex) {
+                cellBounariesReached.x = true;
+            }
+            if (ub > consts.numVertices || cells.indices[ub] != cellIndex) {
+                cellBounariesReached.y = true;
+            }
+            
+            if (!cellBounariesReached.x) {
+                uint otherID = cellLookup.table[uint(lb)];
+                if (otherID != index && length(positions.p[otherID].xyz - positions.p[index].xyz) < consts.smoothingRadius) {
+                    integrate(index, otherID);
+                }
+            }
+            if (!cellBounariesReached.y) {
+                uint otherID = cellLookup.table[ub];
+                if (otherID != index && length(positions.p[otherID].xyz - positions.p[index].xyz) < consts.smoothingRadius) {
+                    integrate(index, otherID);
+                }
+            }
+            intracell_offset += 1;
+        }
+    }
+
+}

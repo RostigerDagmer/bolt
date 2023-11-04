@@ -1,0 +1,79 @@
+#version 460
+#extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
+// Uniform buffer objects for half-edge data structure.
+struct ModelVertex {
+    vec4 pos;
+    vec4 color;
+    vec4 normal;
+    vec4 uv;
+};
+struct PhysicsProperties {
+    float mass;
+    vec3 velocity;
+    float radius;
+    vec3 acceleration;
+};
+
+
+layout(std430, binding = 0) buffer VertexToHalfEdge { uint64_t vToHe[]; } vertexToHalfEdge[];//buffer VertexToHalfEdge { uint64_t vToHe[]; } vertexToHalfEdge[];
+layout(std430, binding = 1, scalar) buffer Vertices { ModelVertex v[]; } vertices[];
+layout(std430, binding = 2, scalar) buffer HalfEdges { uvec2 edges[]; } halfEdges[];
+layout(std430, binding = 3, scalar) buffer volatile Properties { PhysicsProperties pp[]; } properties[];
+layout(push_constant) uniform Constants {
+    float springConstant;
+    float deltaTime;
+    int numVertices;
+    int numEdges;
+} consts;
+
+// Function to compute the Runge-Kutta 4th order method.
+vec4 rungeKutta4(vec4 position, vec4 velocity, float deltaTime) {
+    vec4 k1 = deltaTime * velocity;
+    vec4 k2 = deltaTime * (velocity + k1 / 2.0);
+    vec4 k3 = deltaTime * (velocity + k2 / 2.0);
+    vec4 k4 = deltaTime * (velocity + k3);
+    return position + (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0;
+}
+
+// Main compute shader function.
+void main() {
+    uint index = uint(gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_GlobalInvocationID.x);
+    uint instance = uint(gl_GlobalInvocationID.z);
+    if (index >= consts.numVertices) {
+        return; // Exit if the current index is out of bounds.
+    }
+
+    // Get the current position and velocity of the mass.
+    vec4 position = vertices[instance].v[index].pos;
+    vec4 velocity = vec4(properties[instance].pp[index].velocity, 1.0);
+
+    // Find the one-ring neighborhood using the half-edge data structure.
+    uint firstHalfEdgeIndex = uint(vertexToHalfEdge[instance].vToHe[index]);
+    uint currentHalfEdgeIndex = firstHalfEdgeIndex;
+    
+    do {
+        // Find the adjacent vertex.
+        uint otherIndex = uint(halfEdges[instance].edges[currentHalfEdgeIndex].y);
+        vec4 otherPosition = vertices[instance].v[otherIndex].pos;
+
+        // Calculate the spring force.
+        vec4 diff = position - otherPosition;
+        float dist = length(diff.xyz);
+        vec4 springForce = vec4(-consts.springConstant * (dist - 1.0) * normalize(diff.xyz), 1.0);
+
+        // Update the velocity.
+        velocity += springForce * 0.98; // static damping
+
+        // Move to the next half-edge in the one-ring neighborhood.
+        uint oppositeHalfEdgeIndex = halfEdges[instance].edges[currentHalfEdgeIndex].y;
+        currentHalfEdgeIndex = halfEdges[instance].edges[oppositeHalfEdgeIndex].x;
+    } while (currentHalfEdgeIndex != firstHalfEdgeIndex);
+
+    // Integrate the position using the Runge-Kutta 4th order method.
+    vec4 newPosition = rungeKutta4(position, velocity, consts.deltaTime);
+
+    // Update the position in the vertex buffer.
+    vertices[instance].v[index].pos = newPosition;
+}
