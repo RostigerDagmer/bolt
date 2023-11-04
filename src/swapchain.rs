@@ -4,10 +4,10 @@ use crate::{
 };
 use ash::vk;
 use ash::{extensions::khr};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub struct Swapchain {
-    context: Arc<SharedContext>,
+    context: Arc<Mutex<SharedContext>>,
     pub swapchain_loader: khr::Swapchain,
     swapchain: vk::SwapchainKHR,
     present_images: Vec<Image2d>,
@@ -18,7 +18,7 @@ pub struct Swapchain {
 }
 
 impl Swapchain {
-    pub fn new(context: Arc<SharedContext>, window: &Window, settings: &RendererSettings) -> Self {
+    pub fn new(context: Arc<Mutex<SharedContext>>, window: &Window, settings: &RendererSettings) -> Self {
         unsafe {
             let mut sample_count = vk::SampleCountFlags::TYPE_1;
             if settings.samples == 2 {
@@ -34,7 +34,7 @@ impl Swapchain {
             } else if settings.samples == 64 {
                 sample_count = vk::SampleCountFlags::TYPE_64;
             }
-            let pdevice = context.physical_device();
+            let pdevice = context.lock().unwrap().physical_device();
             let surface_capabilities = window.get_surface_capabilities(pdevice);
             let mut desired_image_count = surface_capabilities.min_image_count + 1;
             if surface_capabilities.max_image_count > 0
@@ -54,7 +54,7 @@ impl Swapchain {
             };
             let image_format = surface_format.format;
             let present_mode = window.get_surface_present_mode(pdevice, settings.present_mode);
-            let swapchain_loader = khr::Swapchain::new(context.instance(), context.device());
+            let swapchain_loader = khr::Swapchain::new(context.lock().unwrap().instance(), context.lock().unwrap().device());
             let swapchain_create_info = vk::SwapchainCreateInfoKHR::builder()
                 .surface(window.surface())
                 .min_image_count(desired_image_count)
@@ -225,6 +225,8 @@ impl Swapchain {
             unsafe {
                 framebuffers.push(
                     self.context
+                        .lock()
+                        .unwrap()
                         .device()
                         .create_framebuffer(&frame_buffer_create_info, None)
                         .unwrap(),

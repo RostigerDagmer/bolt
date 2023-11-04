@@ -21,6 +21,7 @@ bytemuck = {version = "1.14.0", features = ["derive"]}
 num = "0.4.0"
 circular-queue = "0.2.6"
 ahash = "0.8.2"
+tokio = { version = "1.33.0", features = ["full"] }
 #egui_winit_ash_vk_mem = "0.5.0"
 raw-window-handle = "0.5.0"
 gpu-allocator = "0.18.0"

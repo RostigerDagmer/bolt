@@ -61,7 +61,7 @@ pub struct AppRenderer {
 
 impl AppRenderer {
     // TODO: make this only trait bound
-    pub fn new(window: &mut Window, shared_context: Arc<SharedContext>, render_settings: RendererSettings) -> Self { // resource_manager: &BindlessManager
+    pub fn new(window: &mut Window, shared_context: Arc<Mutex<SharedContext>>, render_settings: RendererSettings) -> Self { // resource_manager: &BindlessManager
         unsafe {
             // should retrieve the context from the resource Manager
             //let shared_context = Arc::new(SharedContext::new(window, &settings));
@@ -86,6 +86,8 @@ impl AppRenderer {
                 let frame = AppFrameData {
                     index: i,
                     in_flight_fence: shared_context
+                        .lock()
+                        .unwrap()
                         .device()
                         .create_fence(&fence_create_info, None)
                         .expect("Create fence failed."),

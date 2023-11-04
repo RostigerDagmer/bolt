@@ -6,7 +6,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
 };
 
-use std::{ops::Drop, sync::Arc};
+use std::{ops::Drop, sync::{Arc, Mutex}};
 use std::time::{Duration, SystemTime};
 
 mod buffer;
@@ -100,7 +100,9 @@ impl App {
             &event_loop,
         );
         // create the context
-        let shared_context = Arc::new(SharedContext::new(&mut window, &settings.render.clone()));
+
+        let (shared_context, queue_manager) = create_shared_context_and_queue_manager(&mut window, &settings.render.clone());
+
         //let resource_manager = BindlessManager::new(&mut window, &settings.manager, Some(settings.render.clone()));
         let renderer = AppRenderer::new(&mut window, shared_context.clone(), settings.render.clone());
         App {

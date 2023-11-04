@@ -1,17 +1,17 @@
 use crate::{Resource, SharedContext};
 use ash::{vk};
 use std::cell::{Cell, RefCell};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 // Based on: https://github.com/KhronosGroup/Vulkan-Samples/blob/master/framework/semaphore_pool.h
 pub struct SemaphorePool {
-    shared_context: Arc<SharedContext>,
+    shared_context: Arc<Mutex<SharedContext>>,
     semaphores: Vec<vk::Semaphore>,
     active_count: usize,
 }
 
 impl SemaphorePool {
-    pub fn new(shared_context: Arc<SharedContext>) -> Self {
+    pub fn new(shared_context: Arc<Mutex<SharedContext>>) -> Self {
         SemaphorePool {
             shared_context,
             semaphores: Vec::new(),
@@ -29,6 +29,8 @@ impl SemaphorePool {
                 let semaphore_create_info = vk::SemaphoreCreateInfo::default();
                 let semaphore = self
                     .shared_context
+                    .lock()
+                    .unwrap()
                     .device()
                     .create_semaphore(&semaphore_create_info, None)
                     .unwrap();
@@ -53,7 +55,7 @@ impl Drop for SemaphorePool {
         self.reset();
         unsafe {
             self.semaphores.iter().for_each(|s| {
-                self.shared_context.device().destroy_semaphore(*s, None);
+                self.shared_context.lock().unwrap().device().destroy_semaphore(*s, None);
             });
         }
     }
