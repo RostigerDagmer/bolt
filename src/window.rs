@@ -1,26 +1,27 @@
 use ash::{extensions::khr::Surface, vk};
 use glam::Vec2;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
-use winit::{event_loop::EventLoop, window::WindowBuilder};
+use async_winit as winit;
+use winit::{event_loop::EventLoop, window::WindowBuilder, ThreadUnsafe};
+
+
 pub struct Window {
-    handle: winit::window::Window,
+    handle: winit::window::Window<ThreadUnsafe>,
     surface_loader: Option<Surface>,
     surface: Option<vk::SurfaceKHR>,
 }
 
 impl Window {
-    pub fn new<S: Into<String>>(
+    pub async fn new<S: Into<String>>(
         width: u32,
         height: u32,
         title: S,
-        event_loop: &EventLoop<()>,
     ) -> Self {
         let window = WindowBuilder::new()
             .with_title(title)
             .with_inner_size(winit::dpi::LogicalSize::new(width as f64, height as f64))
             //.with_decorations(false)
-            .build(event_loop)
-            .unwrap();
+            .build().await.unwrap();
         Window {
             handle: window,
             surface_loader: None,
@@ -36,7 +37,7 @@ impl Window {
         }
     }
 
-    pub fn handle(&self) -> &winit::window::Window {
+    pub fn handle(&self) -> &winit::window::Window<ThreadUnsafe> {
         &self.handle
     }
 
@@ -104,38 +105,38 @@ impl Window {
             .unwrap_or(vk::PresentModeKHR::FIFO)
     }
 
-    pub unsafe fn get_surface_extent(&self, physical_device: vk::PhysicalDevice) -> vk::Extent2D {
+    pub async unsafe fn get_surface_extent(&self, physical_device: vk::PhysicalDevice) -> vk::Extent2D {
         let capabilities = self.get_surface_capabilities(physical_device);
-        let extent = self.get_extent();
+        let extent = self.get_extent().await;
         match capabilities.current_extent.width {
             std::u32::MAX => extent,
             _ => capabilities.current_extent,
         }
     }
 
-    pub fn get_size(&self) -> Vec2 {
-        let sz = self.handle.inner_size();
+    pub async fn get_size(&self) -> Vec2 {
+        let sz = self.handle.inner_size().await;
         Vec2::new(sz.width as f32, sz.height as f32)
     }
 
-    pub fn get_width(&self) -> u32 {
-        self.handle.inner_size().width
+    pub async fn get_width(&self) -> u32 {
+        self.handle.inner_size().await.width
     }
 
-    pub fn get_height(&self) -> u32 {
-        self.handle.inner_size().height
+    pub async fn get_height(&self) -> u32 {
+        self.handle.inner_size().await.height
     }
 
-    pub fn get_extent(&self) -> vk::Extent2D {
-        let sz = self.handle.inner_size();
+    pub async fn get_extent(&self) -> vk::Extent2D {
+        let sz = self.handle.inner_size().await;
         vk::Extent2D {
             width: sz.width as u32,
             height: sz.height as u32,
         }
     }
 
-    pub fn get_extent_3d(&self) -> vk::Extent3D {
-        let extent = self.get_extent();
+    pub async fn get_extent_3d(&self) -> vk::Extent3D {
+        let extent = self.get_extent().await;
         vk::Extent3D {
             width: extent.width,
             height: extent.height,
@@ -143,8 +144,8 @@ impl Window {
         }
     }
 
-    pub fn get_viewport(&self) -> vk::Viewport {
-        let sz = self.handle.inner_size();
+    pub async fn get_viewport(&self) -> vk::Viewport {
+        let sz = self.handle.inner_size().await;
         vk::Viewport::builder()
             .width(sz.width as f32)
             .height(sz.height as f32)
@@ -153,8 +154,8 @@ impl Window {
             .build()
     }
 
-    pub fn get_viewport_gl(&self) -> vk::Viewport {
-        let sz = self.handle.inner_size();
+    pub async fn get_viewport_gl(&self) -> vk::Viewport {
+        let sz = self.handle.inner_size().await;
         vk::Viewport::builder()
             .x(0.0)
             .y(sz.height as f32)
@@ -165,8 +166,8 @@ impl Window {
             .build()
     }
 
-    pub fn get_rect(&self) -> vk::Rect2D {
-        vk::Rect2D::builder().extent(self.get_extent()).build()
+    pub async fn get_rect(&self) -> vk::Rect2D {
+        vk::Rect2D::builder().extent(self.get_extent().await).build()
     }
 
     pub fn destroy_surface(&mut self) {
@@ -180,8 +181,8 @@ impl Window {
         self.surface = None;
     }
 
-    pub fn is_minimized(&self) -> bool {
-        let sz = self.handle.inner_size();
+    pub async fn is_minimized(&self) -> bool {
+        let sz = self.handle.inner_size().await;
         sz.width == 0 && sz.height == 0
     }
 }

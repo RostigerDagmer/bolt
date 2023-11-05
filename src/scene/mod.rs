@@ -287,43 +287,6 @@ fn load_daz(context: Arc<Context>, filepath: &PathBuf) -> Result<Scene, Box<dyn 
                 uv: glam::vec4(0.0, 0.0, 0.0, 0.0),
             }
         }).collect::<Vec<ModelVertex>>();
-
-        // index_buffer.par_iter()
-        // .collect::<Vec<_>>()
-        // .windows(3)
-        // .for_each(|i| {
-        //     let v_prev = vertices[*i[0] as usize].pos;
-        //     let v = vertices[*i[1] as usize].pos;
-        //     let v_next = vertices[*i[2] as usize].pos;
-        //     let a  = v_next - v;
-        //     let b = v_prev - v;
-        //     let normal = glam::Vec4::from((a.xyz().cross(b.xyz()).normalize(), 1.0));
-        //     vertices[*i[0] as usize].normal = normal;
-        //     vertices[*i[1] as usize].normal = normal;
-        //     vertices[*i[2] as usize].normal = normal;
-        // });
-
-        // correcting normals by flipping.
-
-        // println!("{}: {} vertices", geo.name, vertices.len());
-        // println!("{}: {} faces", geo.name, index_buffer.len() / 3);
-
-        // index_buffer.par_iter()
-        // .collect::<Vec<_>>()
-        // .windows(32)
-        // .for_each(|window| {
-        //     let mut same_dir_count = 0;
-        //     let v = *window[0];
-        //     // for i in window {
-        //     //     if vertices[**i as usize].normal.dot(vertices[v as usize].normal) > 0.0 {
-        //     //         same_dir_count += 1;
-        //     //     }
-        //     // }
-        //     // if same_dir_count < (window.len() / 2) {
-        //     //     vertices[v as usize].normal = -vertices[v as usize].normal;
-        //     // }
-        //     //vertices[v as usize].normal = -vertices[v as usize].normal;
-        // });
         
         let sections = vec![PrimitiveSection {
             index: 0,

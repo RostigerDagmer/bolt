@@ -1,12 +1,16 @@
 #![allow(dead_code)]
+#![feature(type_alias_impl_trait)]
+#![feature(async_closure)]
+
 extern crate num_cpus;
 // use resource::{BindlessManager, ResourceManager, ManagerBaseSettings};
 use winit::{
     event::{ElementState, Event, ModifiersState, VirtualKeyCode, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget}, ThreadUnsafe,
 };
+use futures_lite::{future::FutureExt, pin};
 
-use std::{ops::Drop, sync::{Arc, Mutex}};
+use std::{ops::Drop, sync::{Arc, Mutex}, future::Future, borrow::BorrowMut, pin::Pin};
 use std::time::{Duration, SystemTime};
 
 mod buffer;
@@ -29,6 +33,7 @@ pub mod debug;
 pub mod compute_pipeline;
 pub mod compute_pass;
 pub mod sort;
+pub mod command;
 
 pub use crate::buffer::*;
 pub use crate::context::*;
@@ -43,9 +48,10 @@ pub use crate::window::*;
 pub use crate::compute_pipeline::*;
 pub use crate::sort::*;
 pub use crate::compute_pass::*;
+pub use crate::command::*;
 pub use ash;
 pub use glam;
-pub use winit;
+pub use async_winit as winit;
 
 // Simple offset_of macro akin to C++ offsetof
 #[macro_export]
@@ -92,19 +98,18 @@ impl App {
         }
     }
 
-    pub fn new(settings: AppSettings, event_loop: &EventLoop<()>) -> Self {
+    pub async fn new(settings: AppSettings) -> Self {
         let mut window = Window::new(
             settings.resolution[0],
             settings.resolution[1],
             settings.name.clone(),
-            &event_loop,
-        );
+        ).await;
         // create the context
 
         let (shared_context, queue_manager) = create_shared_context_and_queue_manager(&mut window, &settings.render.clone());
 
         //let resource_manager = BindlessManager::new(&mut window, &settings.manager, Some(settings.render.clone()));
-        let renderer = AppRenderer::new(&mut window, shared_context.clone(), settings.render.clone());
+        let renderer = AppRenderer::new(&mut window, shared_context.clone(), queue_manager, settings.render.clone()).await;
         App {
             settings,
             renderer,
@@ -123,8 +128,8 @@ impl App {
 pub type PrepareFn = fn() -> AppSettings;
 pub type SetupFn<T> = fn(&mut App) -> T; // TODO: how do we specify FnOnce here?
 pub type UpdateFn<T> = fn(&mut App, &mut T);
-pub type RenderFn<T> = fn(&mut App, &mut T) -> Result<(), AppRenderError>;
-pub type WindowEventFn<T> = fn(&mut App, &mut T, event: &WindowEvent);
+pub type RenderFn<T> = fn(&mut App, &mut T) -> Pin<Box<dyn futures::Future<Output = Result<(), AppRenderError>>>>;
+pub type WindowEventFn<T> = fn(&mut App, &mut T, target: &EventLoopWindowTarget);
 
 #[derive(Clone, Debug)]
 pub struct AppSettings {
@@ -179,8 +184,8 @@ impl<T> AppBuilder<T> {
     }
 }
 
-fn main_loop<T: 'static>(builder: AppBuilder<T>) {
-    let event_loop = EventLoop::new();
+async fn main_loop<T: 'static>(builder: AppBuilder<T>) {
+    let event_loop = EventLoop::<ThreadUnsafe>::new();
     let mut settings = AppSettings::default();
     match builder.prepare {
         Some(prepare) => {
@@ -188,48 +193,68 @@ fn main_loop<T: 'static>(builder: AppBuilder<T>) {
         }
         None => {}
     }
-    let mut app = App::new(settings, &event_loop);
+    let mut app = App::new(settings).await;
     let mut app_data = (builder.setup)(&mut app);
     let mut dirty_swapchain = false;
+    
 
     let now = SystemTime::now();
     let mut modifiers = ModifiersState::default();
+    let window_target = event_loop.window_target().clone();
 
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll;
-
-        if !app.window.is_minimized() {
-            
-            if dirty_swapchain {
-                app.recreate_swapchain();
-                dirty_swapchain = false;
-            }
-
-            match event {
-                Event::WindowEvent { event, .. } => {
-                    match event {
-                        WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-                        WindowEvent::KeyboardInput { input, .. } => {
-                            if input.state == ElementState::Pressed {
-                                if input.virtual_keycode == Some(VirtualKeyCode::Q)
-                                    && (modifiers.ctrl() || modifiers.logo())
-                                {
-                                    *control_flow = ControlFlow::Exit;
-                                }
-                            }
-                        }
-                        WindowEvent::MouseInput { .. } => {}
-                        WindowEvent::ModifiersChanged(m) => modifiers = m,
-                        _ => (),
-                    }
-                    match builder.window_event {
-                        Some(event_fn) => {
-                            event_fn(&mut app, &mut app_data, &event);
-                        }
-                        None => {}
-                    }
+    event_loop.block_on(async move {
+        loop {
+            let window = app.window.handle().clone();
+            let device = app.renderer.context.device().clone();
+            if !window.is_minimized().await.unwrap() {
+                window_target.resumed().await;
+                if dirty_swapchain {
+                    app.recreate_swapchain();
+                    dirty_swapchain = false;
                 }
-                Event::MainEventsCleared => {
+
+                
+                let close = async {
+                    window.close_requested().wait().await;
+                    true
+                };
+                let close_keyboard = async {
+                    let input = window.keyboard_input().await.input;
+                    if input.state == ElementState::Pressed {
+                        if input.virtual_keycode == Some(VirtualKeyCode::Q)
+                            && (modifiers.ctrl() || modifiers.logo())
+                        {
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                };
+                let mouse = async {
+                    let input = window.mouse_input().await;
+                    if input.state == ElementState::Pressed {
+                        true
+                    } else {
+                        false
+                    }
+                };
+
+                let m = async {
+                    let modifiers = window.modifiers_changed().await;
+                    modifiers
+                };
+
+                match (builder.window_event) {
+                    Some(event_fn) => {
+                        event_fn(&mut app, &mut app_data, &window_target);
+                    }
+                    None => {}
+                }
+
+                let main_events_cleared = async {
+                    window.redraw_requested().await;
                     let now = now.elapsed().unwrap();
                     if app.elapsed_ticks % 10 == 0 {
                         let cpu_time = now.as_millis() as f32 - app.elapsed_time.as_millis() as f32;
@@ -238,31 +263,48 @@ fn main_loop<T: 'static>(builder: AppBuilder<T>) {
                     }
                     app.elapsed_time = now;
 
-                    match builder.update {
+                    match (builder.update) {
                         Some(update_fn) => {
                             update_fn(&mut app, &mut app_data);
                         }
                         None => {}
                     }
 
-                    dirty_swapchain = match builder.render {
+                    dirty_swapchain = match (builder.render) {
                         Some(render_fn) => {
+                            let future = render_fn(&mut app, &mut app_data);
+                            let res = future.await;
                             matches!(
-                                render_fn(&mut app, &mut app_data),
+                                res,
                                 Err(AppRenderError::DirtySwapchain)
                             )
                         }
                         None => false,
                     };
+                };
 
-                    app.elapsed_ticks += 1;
+                let suspend = async {
+                    window_target.suspended().wait().await;
+                    false
+                };
+
+                let destroyed = async {
+                    window.destroyed().await;
+                    true
+                };
+
+                if destroyed.await {
+                    unsafe {
+                        device.device_wait_idle().unwrap();
+                    }
                 }
-                Event::Suspended => println!("Suspended."),
-                Event::Resumed => println!("Resumed."),
-                Event::LoopDestroyed => unsafe {
-                    app.renderer.context.device().device_wait_idle().unwrap();
-                },
-                _ => {}
+
+                let needs_exit = close.or(close_keyboard).or(suspend).await;
+
+                if needs_exit {
+                    window_target.exit().await;
+                }
+
             }
         }
     });

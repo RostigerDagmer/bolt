@@ -7,10 +7,8 @@ use bolt::scene;
 use bolt::scene::HalfEdgeID;
 use bolt::scene::ID;
 use bolt::scene::VertexID;
-use async_winit as winit;
 use winit::event::WindowEvent;
 use rayon::prelude::*;
-use winit::event_loop::EventLoopWindowTarget;
 
 #[repr(C)]
 #[derive(Default, Copy, Clone)]
@@ -76,7 +74,7 @@ pub struct AppData {
     pub enable_sky: bool, //Temporary shader hack for sky/sun light
 }
 
-async fn create_image_target(
+fn create_image_target(
     context: &Arc<bolt::Context>,
     window: &bolt::Window,
     format: vk::Format,
@@ -84,7 +82,7 @@ async fn create_image_target(
     let image_info = vk::ImageCreateInfo::builder()
         .image_type(vk::ImageType::TYPE_2D)
         .format(format)
-        .extent(window.get_extent_3d().await)
+        .extent(window.get_extent_3d())
         .mip_levels(1)
         .array_layers(1)
         .samples(vk::SampleCountFlags::TYPE_1)
@@ -171,7 +169,7 @@ fn build_collision_pipeline_sbt(
 }
 
 
-pub async fn setup(app: &mut bolt::App) -> AppData {
+pub fn setup(app: &mut bolt::App) -> AppData {
     let context = &app.renderer.context;
     let index = std::env::args().position(|arg| arg == "--model").unwrap();
     let mut scene = scene::load_scene(
@@ -191,10 +189,10 @@ pub async fn setup(app: &mut bolt::App) -> AppData {
     let camera = match scene.camera {
         Some(scene_camera) => {
             let mut cam = scene_camera;
-            cam.set_window_size(app.window.get_size().await);
+            cam.set_window_size(app.window.get_size());
             cam
         }
-        None => scene::Camera::new(app.window.get_size().await)
+        None => scene::Camera::new(app.window.get_size())
     };
 
     let scene_description = ray::SceneDescription::from_scene(context.clone(), &mut scene);
@@ -315,7 +313,7 @@ pub async fn setup(app: &mut bolt::App) -> AppData {
     for _ in 0..app.renderer.get_frames_count() {
         let uniforms = SceneUniforms::from(
             &camera,
-            uvec3(app.window.get_width().await, app.window.get_height().await, 0),
+            uvec3(app.window.get_width(), app.window.get_height(), 0),
         );
         let ubo = bolt::Buffer::from_data(
             context.clone(),
@@ -344,13 +342,13 @@ pub async fn setup(app: &mut bolt::App) -> AppData {
     let (graphics_pipeline, sbt) = build_pipeline_sbt(&context, &pipeline_layout, enable_sky);
     // let (collision_pipeline, collision_sbt) = build_collision_pipeline_sbt(&context, &pipeline_layout);
     let mut accum_target =
-        create_image_target(&context, &app.window, vk::Format::R32G32B32A32_SFLOAT).await;
+        create_image_target(&context, &app.window, vk::Format::R32G32B32A32_SFLOAT);
 
     let cmd = context.begin_single_time_cmd();
     accum_target.transition_image_layout(cmd, vk::ImageLayout::UNDEFINED, vk::ImageLayout::GENERAL);
     context.end_single_time_cmd(cmd);
 
-    let render_target = create_image_target(&context, &app.window, vk::Format::R8G8B8A8_UNORM).await;
+    let render_target = create_image_target(&context, &app.window, vk::Format::R8G8B8A8_UNORM);
 
     AppData {
         scene,
@@ -380,7 +378,7 @@ pub async fn setup(app: &mut bolt::App) -> AppData {
     }
 }
 
-pub async fn window_event(app: &mut bolt::App, data: &mut AppData, target: &EventLoopWindowTarget) {
+pub fn window_event(app: &mut bolt::App, data: &mut AppData, event: &WindowEvent) {
     if data.manip.update(&event) {
         data.accumulation_start_frame = app.elapsed_ticks as u32;
     }
@@ -424,7 +422,7 @@ pub async fn window_event(app: &mut bolt::App, data: &mut AppData, target: &Even
     }
 }
 
-pub fn render(app: &mut bolt::App, data: &mut AppData) -> Result<(), bolt::AppRenderError> {
+pub async fn render(app: &mut bolt::App, data: &mut AppData) -> Result<(), bolt::AppRenderError> {
     let (semaphore, frame_index) = app.renderer.acquire_next_image()?;
 
     let ref mut frame_ubo = data.per_frame[frame_index].ubo;
@@ -432,151 +430,91 @@ pub fn render(app: &mut bolt::App, data: &mut AppData) -> Result<(), bolt::AppRe
         &data.manip.camera,
         uvec3(app.window.get_width(), app.window.get_height(), app.elapsed_ticks as u32)
     )]);
+    
 
-    let cmd = app.renderer.begin_command_buffer();
-    let device = app.renderer.context.device();
+    
+    let handle = tokio::spawn(async {
+        
+        let mut cmd = app.renderer.context.begin_single_time_cmd();
 
-    unsafe {
-        device.cmd_push_constants(
+        app.renderer.context.end_single_time_cmd(cmd);
+    
+        let cmd = app.renderer.begin_command_buffer();
+        let device = app.renderer.context.device();
+    
+        unsafe {
+            device.cmd_push_constants(
+                cmd,
+                data.graphics_pipeline_layout.handle(),
+                vk::ShaderStageFlags::RAYGEN_KHR,
+                0,
+                &data.accumulation_start_frame.to_ne_bytes(),
+            );
+        }
+    
+        data.scene_description.tlas_regenerate(cmd);
+    
+        data.render_target.transition_image_layout(
             cmd,
-            data.graphics_pipeline_layout.handle(),
-            vk::ShaderStageFlags::RAYGEN_KHR,
-            0,
-            &data.accumulation_start_frame.to_ne_bytes(),
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::GENERAL,
         );
-    }
-
-    // let new_geos = data.scene.vulkan_meshes.iter().enumerate().map(|(i, mesh)| {
-    //     (i, mesh.primitive_sections.iter().map(|primitive| {
-    //             let (index_buffer, index_count, index_offset_size) = match &mesh.index_buffer {
-    //                 Some(buffer) => (
-    //                     Some(buffer.get_device_address()),
-    //                     Some(primitive.get_index_count()),
-    //                     Some(primitive.get_index_offset_size::<u32>()),
-    //                 ),
-    //                 None => (None, None, None),
-    //             };
-    //             GeometryInstance {
-    //             vertex_buffer: mesh.vertex_buffer.get_device_address(),
-    //             vertex_count: primitive.get_vertex_count(),
-    //             vertex_offset_size: primitive.get_vertex_offset_size(),
-    //             vertex_offset: primitive.get_vertex_offset(),
-    //             index_buffer,
-    //             index_count,
-    //             index_offset_size,
-    //             transform: glam::Mat4::IDENTITY, //TODO: Does this work?? <- no
-    //         }
-    //     }))
-    // });
-
-    // data.scene_description.blas_regenerate(cmd,new_geos);
-    data.scene_description.tlas_regenerate(cmd);
-
-    data.render_target.transition_image_layout(
-        cmd,
-        vk::ImageLayout::UNDEFINED,
-        vk::ImageLayout::GENERAL,
-    );
-
-    let desc_pass = data.graphics_layout_pass.get_or_create(
-        bolt::DescriptorSetInfo::default()
-            .accel_struct(0, data.scene_description.tlas().handle())
-            .image(1, data.accum_target.get_descriptor_info())
-            .image(2, data.render_target.get_descriptor_info())
-            .buffer(
-                3,
-                data.scene_description
-                    .get_instances_buffer()
-                    .get_descriptor_info(),
-            )
-            .buffers(4, data.scene_description.get_vertex_descriptors().clone())
-            .buffers(5, data.scene_description.get_index_descriptors().clone())
-            .buffers(6, data.scene_description.get_material_descriptors().clone())
-            .buffers(7, data.scene_description.get_physics_descriptors().clone())
-            .images(8, data.scene_description.get_texture_descriptors().clone())
-            .image_opt(9, &data.skydome),
-    );
-
-    //let (half_edge_desc, vertex_to_he_desc) = data.scene_description.get_half_edge_descriptors();
-
-    // let compute_pass = data.layout_compute.get_or_create(
-    //     bolt::DescriptorSetInfo::default()
-    //     .buffers(0, vertex_to_he_desc.clone())
-    //     .buffers(1, data.scene_description.get_vertex_descriptors().clone())
-    //     .buffers(2, half_edge_desc.clone())
-    //     .buffers(2, data.scene_description.get_physics_descriptors().clone())
-    // );
-
-    let descriptor_sets = [data.per_frame[frame_index].desc_set.handle(), desc_pass.handle()];
-    // unsafe {
-    //     device.cmd_set_scissor(cmd, 0, &[app.window.get_rect()]);
-    //     device.cmd_set_viewport(cmd, 0, &[app.window.get_viewport()]);
-    //     // run collision pass
-    //     // device.cmd_bind_pipeline(
-    //     //     cmd,
-    //     //     vk::PipelineBindPoint::RAY_TRACING_KHR,
-    //     //     data.collision_pipeline.handle(),
-    //     // );
-    //     device.cmd_bind_descriptor_sets(
-    //         cmd,
-    //         vk::PipelineBindPoint::RAY_TRACING_KHR,
-    //         data.graphics_pipeline_layout.handle(),
-    //         0,
-    //         descriptor_sets.as_slice(),
-    //         &[],
-    //     );
-    // }
-    // todo depth should be instance count
-    // let instance_count = data.scene_description.get_instances_buffer().get_element_count();
-    // data.collision_sbt.cmd_trace_rays(cmd, vk::Extent3D::builder().width(1024).height(1024).depth(instance_count).build());
-
-
-    unsafe {
-        // device.cmd_pipeline_barrier(
-        //     cmd,
-        //     vk::PipelineStageFlags::RAY_TRACING_SHADER_KHR, // Source stage
-        //     vk::PipelineStageFlags::RAY_TRACING_SHADER_KHR, // Destination stage
-        //     vk::DependencyFlags::empty(),
-        //     &[],
-        //     &[vk::BufferMemoryBarrier {
-        //         src_access_mask: vk::AccessFlags::SHADER_WRITE, // The collision pass writes to the buffer
-        //         dst_access_mask: vk::AccessFlags::SHADER_READ,  // The graphics pass reads from the buffer
-        //         src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-        //         dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-        //         buffer: data.scene.meshes[0].vertices.handle(), // The buffer being accessed
-        //         offset: 0,                  // Start offset of the buffer
-        //         size: vk::WHOLE_SIZE,       // Size of the buffer
-        //         ..Default::default()
-        //     }],
-        //     &[],
-        // );
-        // run the graphics pass
-        device.cmd_set_scissor(cmd, 0, &[app.window.get_rect()]);
-        device.cmd_set_viewport(cmd, 0, &[app.window.get_viewport()]);
-        device.cmd_bind_pipeline(
+    
+        let desc_pass = data.graphics_layout_pass.get_or_create(
+            bolt::DescriptorSetInfo::default()
+                .accel_struct(0, data.scene_description.tlas().handle())
+                .image(1, data.accum_target.get_descriptor_info())
+                .image(2, data.render_target.get_descriptor_info())
+                .buffer(
+                    3,
+                    data.scene_description
+                        .get_instances_buffer()
+                        .get_descriptor_info(),
+                )
+                .buffers(4, data.scene_description.get_vertex_descriptors().clone())
+                .buffers(5, data.scene_description.get_index_descriptors().clone())
+                .buffers(6, data.scene_description.get_material_descriptors().clone())
+                .buffers(7, data.scene_description.get_physics_descriptors().clone())
+                .images(8, data.scene_description.get_texture_descriptors().clone())
+                .image_opt(9, &data.skydome),
+        );
+    
+        let descriptor_sets = [data.per_frame[frame_index].desc_set.handle(), desc_pass.handle()];
+    
+        unsafe {
+            // run the graphics pass
+            device.cmd_set_scissor(cmd, 0, &[app.window.get_rect()]);
+            device.cmd_set_viewport(cmd, 0, &[app.window.get_viewport()]);
+            device.cmd_bind_pipeline(
+                cmd,
+                vk::PipelineBindPoint::RAY_TRACING_KHR, 
+                data.graphics_pipeline.handle()
+            );
+            device.cmd_bind_descriptor_sets(
+                cmd,
+                vk::PipelineBindPoint::RAY_TRACING_KHR,
+                data.graphics_pipeline_layout.handle(),
+                0,
+                descriptor_sets.as_slice(),
+                &[],
+            );
+        }
+        data.sbt.cmd_trace_rays(cmd, app.window.get_extent_3d());
+        let present_image = app.renderer.swapchain.get_present_image(frame_index);
+        data.render_target.cmd_blit_to(cmd, present_image, true);
+        present_image.transition_image_layout(
             cmd,
-            vk::PipelineBindPoint::RAY_TRACING_KHR, 
-            data.graphics_pipeline.handle()
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::PRESENT_SRC_KHR,
         );
-        device.cmd_bind_descriptor_sets(
-            cmd,
-            vk::PipelineBindPoint::RAY_TRACING_KHR,
-            data.graphics_pipeline_layout.handle(),
-            0,
-            descriptor_sets.as_slice(),
-            &[],
-        );
-    }
-    data.sbt.cmd_trace_rays(cmd, app.window.get_extent_3d());
-    let present_image = app.renderer.swapchain.get_present_image(frame_index);
-    data.render_target.cmd_blit_to(cmd, present_image, true);
-    present_image.transition_image_layout(
-        cmd,
-        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        vk::ImageLayout::PRESENT_SRC_KHR,
-    );
-    app.renderer.end_command_buffer(cmd);
+        app.renderer.end_command_buffer(cmd);
+        cmd
+    });
+    
+    
+    let cmd = handle.await.unwrap();
     app.renderer.submit_and_present(cmd, semaphore)
+
 }
 
 pub fn prepare() -> bolt::AppSettings {
@@ -592,7 +530,9 @@ pub fn prepare() -> bolt::AppSettings {
 }
 
 /// WTF something is wrong. NVidia driver 532.03 runs this no problemo. Upwards we get ERROR_DEVICE_LOST.
-pub fn main() {
+
+#[tokio::main]
+pub async fn main() {
     env::set_var("RUST_BACKTRACE", "full");
     bolt::App::build(setup)
         .prepare(prepare)

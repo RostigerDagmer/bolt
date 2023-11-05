@@ -7,7 +7,7 @@ use ash::{extensions::khr};
 use std::sync::{Arc, Mutex};
 
 pub struct Swapchain {
-    context: Arc<Mutex<SharedContext>>,
+    context: Arc<SharedContext>,
     pub swapchain_loader: khr::Swapchain,
     swapchain: vk::SwapchainKHR,
     present_images: Vec<Image2d>,
@@ -18,7 +18,7 @@ pub struct Swapchain {
 }
 
 impl Swapchain {
-    pub fn new(context: Arc<Mutex<SharedContext>>, window: &Window, settings: &RendererSettings) -> Self {
+    pub async fn new(context: Arc<SharedContext>, window: &Window, settings: &RendererSettings) -> Self {
         unsafe {
             let mut sample_count = vk::SampleCountFlags::TYPE_1;
             if settings.samples == 2 {
@@ -34,7 +34,7 @@ impl Swapchain {
             } else if settings.samples == 64 {
                 sample_count = vk::SampleCountFlags::TYPE_64;
             }
-            let pdevice = context.lock().unwrap().physical_device();
+            let pdevice = context.physical_device();
             let surface_capabilities = window.get_surface_capabilities(pdevice);
             let mut desired_image_count = surface_capabilities.min_image_count + 1;
             if surface_capabilities.max_image_count > 0
@@ -42,7 +42,7 @@ impl Swapchain {
             {
                 desired_image_count = surface_capabilities.max_image_count;
             }
-            let extent = window.get_surface_extent(pdevice);
+            let extent = window.get_surface_extent(pdevice).await;
             let surface_format = window.get_surface_format(pdevice);
             let pre_transform = if surface_capabilities
                 .supported_transforms
@@ -54,7 +54,7 @@ impl Swapchain {
             };
             let image_format = surface_format.format;
             let present_mode = window.get_surface_present_mode(pdevice, settings.present_mode);
-            let swapchain_loader = khr::Swapchain::new(context.lock().unwrap().instance(), context.lock().unwrap().device());
+            let swapchain_loader = khr::Swapchain::new(context.instance(), &context.device());
             let swapchain_create_info = vk::SwapchainCreateInfoKHR::builder()
                 .surface(window.surface())
                 .min_image_count(desired_image_count)
@@ -86,7 +86,7 @@ impl Swapchain {
                     let depth_image_create_info = vk::ImageCreateInfo::builder()
                         .image_type(vk::ImageType::TYPE_2D)
                         .format(vk::Format::D16_UNORM)
-                        .extent(window.get_extent_3d())
+                        .extent(window.get_extent_3d().await)
                         .mip_levels(1)
                         .array_layers(1)
                         .samples(sample_count)
@@ -109,7 +109,7 @@ impl Swapchain {
                     let image_create_info = vk::ImageCreateInfo::builder()
                         .image_type(vk::ImageType::TYPE_2D)
                         .format(image_format)
-                        .extent(window.get_extent_3d())
+                        .extent(window.get_extent_3d().await)
                         .mip_levels(1)
                         .array_layers(1)
                         .samples(sample_count)
@@ -196,7 +196,7 @@ impl Swapchain {
         }
     }
 
-    pub fn create_framebuffers(
+    pub async fn create_framebuffers(
         &self,
         renderpass: &RenderPass,
         window: &Window,
@@ -219,14 +219,12 @@ impl Swapchain {
             let frame_buffer_create_info = vk::FramebufferCreateInfo::builder()
                 .render_pass(renderpass.handle())
                 .attachments(&attachments)
-                .width(window.get_extent().width)
-                .height(window.get_extent().height)
+                .width(window.get_extent().await.width)
+                .height(window.get_extent().await.height)
                 .layers(1);
             unsafe {
                 framebuffers.push(
                     self.context
-                        .lock()
-                        .unwrap()
                         .device()
                         .create_framebuffer(&frame_buffer_create_info, None)
                         .unwrap(),

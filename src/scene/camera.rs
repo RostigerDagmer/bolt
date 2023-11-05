@@ -1,5 +1,7 @@
 use glam::*;
-use winit::event::{WindowEvent, VirtualKeyCode, ElementState};
+use async_winit as winit;
+use winit::{event::{WindowEvent, VirtualKeyCode, ElementState}, event_loop::EventLoopWindowTarget, window::Window, ThreadUnsafe};
+
 
 pub enum CameraMode {
     Examine,
@@ -368,79 +370,82 @@ impl Default for CameraManip {
 }
 
 impl CameraManip {
-    pub fn update(&mut self, window_event: &WindowEvent) -> bool {
+    pub async fn update(&mut self, window: &Window<ThreadUnsafe>) -> bool {
         let mut moved = false;
-        match window_event {
-            WindowEvent::Resized(winit::dpi::PhysicalSize { width, height }) => {
-                self.camera
-                    .set_window_size(vec2(*width as f32, *height as f32));
-            }
-            _ => {
-                match self.mode {
-                    CameraMode::Spherical => {
-                        moved = self.update_spherical(window_event);
-                    }
-                    CameraMode::Fly => {
-                        moved = self.update_fly(window_event);
-                    }
-                    _ => {}
-                };
-            }
-        }
-        moved
-    }
 
-    pub fn update_spherical(&mut self, window_event: &WindowEvent) -> bool {
-        let mut moved = false;
-        match window_event {
-            WindowEvent::ModifiersChanged(m) => {
-                self.input.alt = m.alt();
-                self.input.ctrl = m.ctrl() || m.logo();
-                self.input.shift = m.shift();
+        let resized = async {
+            let size = window.resized().await;
+            self.camera
+                    .set_window_size(vec2(size.width as f32, size.height as f32));
+        };
+        match self.mode {
+            CameraMode::Spherical => {
+                moved = self.update_spherical(window);
             }
-            WindowEvent::CursorMoved { position, .. } => {
-                let pos = vec2(position.x as f32, position.y as f32);
-                if self.input.is_mouse_down() {
-                    moved = self.camera.mouse_move(pos.x, pos.y, &self.input);
-                } else {
-                    self.camera.set_mouse_pos(pos.x, pos.y);
-                }
-            }
-            WindowEvent::MouseWheel { delta, .. } => {
-                match delta {
-                    winit::event::MouseScrollDelta::PixelDelta(_) => {
-                        //camera.mouse_wheel(d.x.max(d.y) as i32);
-                    }
-                    winit::event::MouseScrollDelta::LineDelta(_, y) => {
-                        self.camera.mouse_wheel(-(*y) as i32);
-                        moved = true;
-                    }
-                };
-            }
-            WindowEvent::MouseInput { state, button, .. } => {
-                let is_down = match state {
-                    winit::event::ElementState::Pressed => true,
-                    winit::event::ElementState::Released => false,
-                };
-                match button {
-                    winit::event::MouseButton::Left => {
-                        self.input.lmb = is_down;
-                    }
-                    winit::event::MouseButton::Right => {
-                        self.input.rmb = is_down;
-                    }
-                    winit::event::MouseButton::Middle => {
-                        self.input.mmb = is_down;
-                    }
-                    _ => {}
-                }
+            CameraMode::Fly => {
+                moved = self.update_fly(window);
             }
             _ => {}
-        }
+        };
         moved
     }
 
-    pub fn update_fly(&mut self, window_event: &WindowEvent) -> bool {
+    pub fn update_spherical(&mut self, window: &Window<ThreadUnsafe>) -> bool {
+        let mut moved = false;
+
+        let modifiers = async {
+            let modifiers = window.modifiers_changed().await;
+            self.input.alt = modifiers.alt();
+            self.input.ctrl = modifiers.ctrl() || modifiers.logo();
+            self.input.shift = modifiers.shift();
+        };
+
+        let cursor_moved = async {
+            let pos = window.cursor_moved().await.position;
+            if self.input.is_mouse_down() {
+                moved = self.camera.mouse_move(pos.x as f32, pos.y as f32, &self.input);
+            } else {
+                self.camera.set_mouse_pos(pos.x as f32, pos.y as f32);
+            }
+        };
+
+        let mouse_wheel = async {
+            let delta = window.mouse_wheel().await.delta;
+            match delta {
+                winit::event::MouseScrollDelta::PixelDelta(_) => {
+                    //camera.mouse_wheel(d.x.max(d.y) as i32);
+                }
+                winit::event::MouseScrollDelta::LineDelta(_, y) => {
+                    self.camera.change_vfov(y);
+                    //self.camera.mouse_wheel(*y as i32);
+                    moved = true;
+                }
+            };
+        };
+
+        let mouse_input = async {
+            let input = window.mouse_input().await;
+            let is_down = match input.state {
+                ElementState::Pressed => true,
+                ElementState::Released => false,
+            };
+            match input.button {
+                winit::event::MouseButton::Left => {
+                    self.input.lmb = is_down;
+                }
+                winit::event::MouseButton::Right => {
+                    self.input.rmb = is_down;
+                }
+                winit::event::MouseButton::Middle => {
+                    self.input.mmb = is_down;
+                }
+                _ => {}
+            }
+        };
+        moved
+    }
+
+    pub fn update_fly(&mut self, window: &Window<ThreadUnsafe>) -> bool {
         let mut moved = false;
         match window_event {
             // handle w a s d key inputs

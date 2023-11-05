@@ -581,7 +581,7 @@ pub fn render(app: &mut bolt::App, data: &mut AppData) -> Result<(), bolt::AppRe
     }
 
     // sort
-    data.sort.pass(cmd, device);
+    data.sort.pass(cmd, &device);
 
 
     // compute

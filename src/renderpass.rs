@@ -21,12 +21,12 @@ pub struct TransientRenderPassInfo {
 }
 
 pub struct RenderPass {
-    context: Arc<Mutex<SharedContext>>,
+    context: Arc<SharedContext>,
     render_pass: vk::RenderPass,
 }
 
 impl RenderPass {
-    pub fn new(context: Arc<Mutex<SharedContext>>, info: RenderPassInfo) -> Self {
+    pub fn new(context: Arc<SharedContext>, info: RenderPassInfo) -> Self {
         unsafe {
             let mut index = 0u32;
             let mut attachments_desc = Vec::<vk::AttachmentDescription>::new();
@@ -118,8 +118,6 @@ impl RenderPass {
                 .subpasses(&subpasses)
                 .dependencies(&dependencies);
             let render_pass = context
-                .lock()
-                .unwrap()
                 .device()
                 .create_render_pass(&create_info, None)
                 .unwrap();
@@ -130,7 +128,7 @@ impl RenderPass {
         }
     }
 
-    pub fn new_transient(context: Arc<Mutex<SharedContext>>, info: TransientRenderPassInfo) -> Self {
+    pub fn new_transient(context: Arc<SharedContext>, info: TransientRenderPassInfo) -> Self {
         let mut index = 0u32;
         let mut attachments_desc = Vec::<vk::AttachmentDescription>::new();
         let mut color_attachment_refs = Vec::<vk::AttachmentReference>::new();
@@ -200,8 +198,6 @@ impl RenderPass {
         let subpasses = [subpass_builder.build()];
         let render_pass = unsafe {
             context
-                .lock()
-                .unwrap()
                 .device()
                 .create_render_pass(
                     &vk::RenderPassCreateInfo::builder()
@@ -225,11 +221,9 @@ impl RenderPass {
         }
     }
 
-    pub fn new_raw(context: Arc<Mutex<SharedContext>>, create_info: &vk::RenderPassCreateInfo) -> Self {
+    pub fn new_raw(context: Arc<SharedContext>, create_info: &vk::RenderPassCreateInfo) -> Self {
         unsafe {
             let render_pass = context
-                .lock()
-                .unwrap()
                 .device()
                 .create_render_pass(create_info, None)
                 .unwrap();
@@ -251,8 +245,6 @@ impl Drop for RenderPass {
     fn drop(&mut self) {
         unsafe {
             self.context
-                .lock()
-                .unwrap()
                 .device()
                 .destroy_render_pass(self.render_pass, None);
         }

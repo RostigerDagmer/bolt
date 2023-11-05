@@ -61,7 +61,7 @@ pub struct AppRenderer {
 
 impl AppRenderer {
     // TODO: make this only trait bound
-    pub fn new(window: &mut Window, shared_context: Arc<Mutex<SharedContext>>, render_settings: RendererSettings) -> Self { // resource_manager: &BindlessManager
+    pub async fn new(window: &mut Window, shared_context: Arc<SharedContext>, queue_manager: QueueManager, render_settings: RendererSettings) -> Self { // resource_manager: &BindlessManager
         unsafe {
             // should retrieve the context from the resource Manager
             //let shared_context = Arc::new(SharedContext::new(window, &settings));
@@ -70,14 +70,15 @@ impl AppRenderer {
                 shared_context.clone(),
                 window,
                 &render_settings
-            );
+            ).await;
             let context = Arc::new(Context::new(
                 shared_context.clone(),
+                queue_manager,
                 swapchain.get_image_count(),
             ));
             swapchain.transition_depth_images(&context);
             let renderpass = swapchain.create_compatible_render_pass();
-            let framebuffers = swapchain.create_framebuffers(&renderpass, window);
+            let framebuffers = swapchain.create_framebuffers(&renderpass, window).await;
 
             let fence_create_info =
                 vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
@@ -86,8 +87,6 @@ impl AppRenderer {
                 let frame = AppFrameData {
                     index: i,
                     in_flight_fence: shared_context
-                        .lock()
-                        .unwrap()
                         .device()
                         .create_fence(&fence_create_info, None)
                         .expect("Create fence failed."),
@@ -144,7 +143,7 @@ impl AppRenderer {
         }
     }
 
-    pub fn recreate_swapchain(&mut self, window: &Window) {
+    pub async fn recreate_swapchain(&mut self, window: &Window) {
         unsafe {
             self.context.device().device_wait_idle().unwrap();
         }
@@ -165,12 +164,12 @@ impl AppRenderer {
             self.context.shared().clone(),
             window,
             &self.settings,
-        ));
+        ).await);
         self.swapchain.transition_depth_images(&self.context);
 
         self.framebuffers = self
             .swapchain
-            .create_framebuffers(&self.renderpass, &window);
+            .create_framebuffers(&self.renderpass, &window).await;
     }
 
     pub fn acquire_next_image(&mut self) -> Result<(vk::Semaphore, usize), AppRenderError> {

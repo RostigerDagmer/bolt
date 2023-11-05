@@ -13,12 +13,11 @@ fn has_stencil_component(format: vk::Format) -> bool {
     format == vk::Format::D32_SFLOAT_S8_UINT || format == vk::Format::D24_UNORM_S8_UINT
 }
 
-fn check_mipmap_support(context: &Arc<Mutex<SharedContext>>, image_format: vk::Format) -> bool {
+fn check_mipmap_support(context: &Arc<SharedContext>, image_format: vk::Format) -> bool {
     let format_properties = unsafe {
-        let guard = context.lock().unwrap();
-        guard
+        context
             .instance()
-            .get_physical_device_format_properties(guard.physical_device(), image_format)
+            .get_physical_device_format_properties(context.physical_device(), image_format)
     };
 
     format_properties
@@ -27,7 +26,7 @@ fn check_mipmap_support(context: &Arc<Mutex<SharedContext>>, image_format: vk::F
 }
 
 pub struct Image2d {
-    context: Arc<Mutex<SharedContext>>,
+    context: Arc<SharedContext>,
     image: vk::Image,
     extent: vk::Extent3D,
     view: vk::ImageView,
@@ -38,7 +37,7 @@ pub struct Image2d {
 
 impl Image2d {
     pub fn new(
-        context: Arc<Mutex<SharedContext>>,
+        context: Arc<SharedContext>,
         image_info: &vk::ImageCreateInfo,
         aspect_mask: vk::ImageAspectFlags,
         level_count: u32,
@@ -48,11 +47,11 @@ impl Image2d {
             assert!(image_info.extent.width + image_info.extent.height > 2);
 
             // Create image
-            let image = context.lock().unwrap().device().create_image(&image_info, None).unwrap();
+            let image = context.device().create_image(&image_info, None).unwrap();
 
             // Allocate and bind memory to image
-            let requirements = context.lock().unwrap().device().get_image_memory_requirements(image);
-            let alloc = context.lock().unwrap().allocator()
+            let requirements = context.device().get_image_memory_requirements(image);
+            let alloc = context.allocator()
                 .lock()
                 .unwrap()
                 .allocate(&AllocationCreateDesc {
@@ -63,7 +62,7 @@ impl Image2d {
                 })
                 .unwrap();
             
-            context.lock().unwrap().device().bind_image_memory(image, alloc.memory(), alloc.offset())
+            context.device().bind_image_memory(image, alloc.memory(), alloc.offset())
                 .unwrap();
 
             let subresource_range = vk::ImageSubresourceRange::builder()
@@ -78,8 +77,6 @@ impl Image2d {
                 .format(image_info.format);
 
             let image_view = context
-                .lock()
-                .unwrap()
                 .device()
                 .create_image_view(&image_view_info, None)
                 .unwrap();
@@ -101,7 +98,7 @@ impl Image2d {
     }
 
     pub fn from_swapchain(
-        context: Arc<Mutex<SharedContext>>,
+        context: Arc<SharedContext>,
         image: vk::Image,
         extent: vk::Extent2D,
         image_format: vk::Format,
@@ -126,8 +123,6 @@ impl Image2d {
                 .image(image)
                 .build();
             let image_view = context
-                .lock()
-                .unwrap()
                 .device()
                 .create_image_view(&create_view_info, None)
                 .unwrap();
@@ -239,7 +234,7 @@ impl Image2d {
                     .build(),
             );
         unsafe {
-            self.context.lock().unwrap().device().cmd_pipeline_barrier(
+            self.context.device().cmd_pipeline_barrier(
                 cmd,
                 src_stage,
                 dst_stage,
@@ -313,7 +308,7 @@ impl Image2d {
             .build();
 
         unsafe {
-            self.context.lock().unwrap().device().cmd_blit_image(
+            self.context.device().cmd_blit_image(
                 cmd,
                 self.handle(),
                 vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
@@ -418,7 +413,7 @@ impl Image2d {
             image_barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
 
             unsafe {
-                self.context.lock().unwrap().device().cmd_pipeline_barrier(
+                self.context.device().cmd_pipeline_barrier(
                     command_buffer,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::FRAGMENT_SHADER,
@@ -472,13 +467,11 @@ impl Resource<vk::Image> for Image2d {
 impl Drop for Image2d {
     fn drop(&mut self) {
         unsafe {
-            self.context.lock().unwrap().device().destroy_image_view(self.view, None);
+            self.context.device().destroy_image_view(self.view, None);
             if self.allocation.is_some() {
-                self.context.lock().unwrap().device().destroy_image(self.image, None);
+                self.context.device().destroy_image(self.image, None);
                 let to_drop = self.allocation.take().unwrap();
                 self.context
-                    .lock()
-                    .unwrap()
                     .allocator()
                     .lock()
                     .unwrap()

@@ -23,61 +23,56 @@ impl QueueFamiliesIndices {
     }
 }
 
+const COMMAND_POOL_COUNT: usize = 2;
+
 #[derive(Debug)]
 pub struct Context {
-    shared_context: Arc<Mutex<SharedContext>>,
+    shared_context: Arc<SharedContext>,
     queue_manager: QueueManager,
     command_manager: CommandManager,
-    frame_command_pools: Vec<CommandPool>,
-    transient_command_pool: vk::CommandPool,
 }
 
 impl Context {
-    pub fn new(shared_context: Arc<Mutex<SharedContext>>, swapchain_image_count: usize) -> Self {
-        unsafe {
-            let mut frame_command_pools = Vec::<CommandPool>::new();
-            let graphics_index = shared_context.lock().unwrap().queue_family_indices.graphics;
-            for _ in 0..swapchain_image_count {
-                frame_command_pools.push(CommandPool::new(shared_context.clone(), graphics_index));
-            }
+    pub fn new(shared_context: Arc<SharedContext>, queue_manager: QueueManager, swapchain_image_count: usize) -> Self {
 
-            let pool_create_info = vk::CommandPoolCreateInfo::builder()
-                .flags(vk::CommandPoolCreateFlags::TRANSIENT)
-                .queue_family_index(graphics_index);
-            let transient_command_pool = shared_context
-                .device()
-                .create_command_pool(&pool_create_info, None)
-                .unwrap();
+        let graphics_index = shared_context.queue_family_indices.graphics;
+        let command_manager = CommandManager::new(shared_context.clone(), graphics_index);
+        
+        for _ in 0..swapchain_image_count {
+            command_manager.create_pool(graphics_index);
+        }
+
+        unsafe {
             Context {
                 shared_context,
-                frame_command_pools,
-                transient_command_pool,
+                queue_manager,
+                command_manager,
             }
         }
     }
 
     pub fn entry(&self) -> &Entry {
-        self.shared_context.lock().unwrap().entry()
+        self.shared_context.entry()
     }
 
     pub fn instance(&self) -> &Instance {
-        self.shared_context.lock().unwrap().instance()
+        self.shared_context.instance()
     }
 
-    pub fn device(&self) -> &Device {
-        self.shared_context.lock().unwrap().device()
+    pub fn device(&self) -> Arc<Device> {
+        self.shared_context.device()
     }
 
     pub fn physical_device(&self) -> vk::PhysicalDevice {
-        self.shared_context.lock().unwrap().physical_device()
+        self.shared_context.physical_device()
     }
 
     pub fn get_physical_device_properties(&self) -> vk::PhysicalDeviceProperties {
-        self.shared_context.lock().unwrap().get_physical_device_properties()
+        self.shared_context.get_physical_device_properties()
     }
 
     pub fn get_physical_device_limits(&self) -> vk::PhysicalDeviceLimits {
-        self.shared_context.lock().unwrap().get_physical_device_limits()
+        self.shared_context.get_physical_device_limits()
     }
 
     pub fn present_queue(&self) -> vk::Queue {
@@ -89,29 +84,29 @@ impl Context {
     }
 
     pub fn allocator(&self) -> &Arc<Mutex<Allocator>> {
-        self.shared_context.lock().unwrap().allocator()
+        self.shared_context.allocator()
     }
 
     pub fn acceleration_structure(&self) -> &khr::AccelerationStructure {
-        self.shared_context.lock().unwrap().acceleration_structure()
+        self.shared_context.acceleration_structure()
     }
 
     pub fn ray_tracing(&self) -> &khr::RayTracingPipeline {
-        self.shared_context.lock().unwrap().ray_tracing()
+        self.shared_context.ray_tracing()
     }
 
     pub unsafe fn ray_tracing_properties(&self) -> &vk::PhysicalDeviceRayTracingPipelinePropertiesKHR {
-        self.shared_context.lock().unwrap().ray_tracing_properties()
+        self.shared_context.ray_tracing_properties()
     }
 
-    pub fn shared(&self) -> &Arc<Mutex<SharedContext>> {
+    pub fn shared(&self) -> &Arc<SharedContext> {
         &self.shared_context
     }
 
     pub fn begin_single_time_cmd(&self) -> vk::CommandBuffer {
         let create_info = vk::CommandBufferAllocateInfo::builder()
             .command_buffer_count(1)
-            .command_pool(self.transient_command_pool)
+            .command_pool(self.command_manager.transient())
             .level(vk::CommandBufferLevel::PRIMARY);
         unsafe {
             let command_buffer = self
@@ -146,22 +141,33 @@ impl Context {
                 .queue_wait_idle(self.graphics_queue())
                 .unwrap();
             self.device()
-                .free_command_buffers(self.transient_command_pool, &command_buffers)
+                .free_command_buffers(self.command_manager.transient(), &command_buffers)
         }
     }
 
     pub fn request_command_buffer(&self, frame_index: usize) -> vk::CommandBuffer {
-        self.frame_command_pools[frame_index].reset();
-        self.frame_command_pools[frame_index].request_command_buffer()
+        // self.frame_command_pools[frame_index].reset();
+        // self.frame_command_pools[frame_index].request_command_buffer()
+        self.command_manager.request_command_buffer(frame_index)
     }
 }
 
-impl Drop for Context {
-    fn drop(&mut self) {
-        unsafe {
-            self.device()
-                .destroy_command_pool(self.transient_command_pool, None);
-            self.frame_command_pools.clear();
-        }
-    }
-}
+// impl Drop for Context {
+//     fn drop(&mut self) {
+//         unsafe {
+//             self.device()
+//                 .destroy_command_pool(self.transient_command_pool, None);
+//             self.frame_command_pools.clear();
+//         }
+//     }
+// }
+
+
+// #[test]
+// fn command_manager_thread_safe() {
+//     fn assert_send<T: Send>() {}
+//     fn assert_sync<T: Sync>() {}
+
+//     assert_send::<Context>();
+//     assert_sync::<Context>();
+// }

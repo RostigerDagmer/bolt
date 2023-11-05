@@ -44,7 +44,7 @@ pub struct SharedContext {
     instance: Instance,
     debug_utils_loader: DebugUtils,
     debug_call_back: vk::DebugUtilsMessengerEXT,
-    device: Device,
+    device: Arc<Device>,
     pdevice: vk::PhysicalDevice,
     allocator: ManuallyDrop<Arc<Mutex<Allocator>>>,
     pub queue_family_indices: QueueFamiliesIndices,
@@ -68,7 +68,7 @@ impl std::fmt::Debug for SharedContext {
 pub fn create_shared_context_and_queue_manager(
     window: &mut Window,
     settings: &RendererSettings,
-) -> (Arc<Mutex<SharedContext>>, QueueManager) {
+) -> (Arc<SharedContext>, QueueManager) {
     unsafe {
         let entry = Entry::load().unwrap();
 
@@ -189,7 +189,7 @@ pub fn create_shared_context_and_queue_manager(
             instance,
             debug_utils_loader,
             debug_call_back,
-            device,
+            device: Arc::new(device),
             pdevice,
             allocator: ManuallyDrop::new(Arc::new(Mutex::new(allocator))),
             queue_family_indices,
@@ -203,7 +203,7 @@ pub fn create_shared_context_and_queue_manager(
             graphics_queue,
             present_queue,
         };
-        (Arc::new(Mutex::new(shared_context)), queue_manager)
+        (Arc::new(shared_context), queue_manager)
     }
 }
 
@@ -217,8 +217,8 @@ impl SharedContext {
         &self.instance
     }
 
-    pub fn device(&self) -> &Device {
-        &self.device
+    pub fn device(&self) -> Arc<Device> {
+        self.device.clone()
     }
 
     pub fn physical_device(&self) -> vk::PhysicalDevice {
@@ -264,4 +264,14 @@ impl Drop for SharedContext {
             self.instance.destroy_instance(None);
         }
     }
+}
+
+
+#[test]
+fn command_manager_thread_safe() {
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    assert_send::<QueueManager>();
+    assert_sync::<QueueManager>();
 }
