@@ -6,3 +6,4 @@ pub use structures::*;
 pub mod material;
 pub mod image;
 pub mod mesh;
+pub mod skin;

@@ -108,6 +108,16 @@ pub struct Formula {
     operations: Vec<Operation>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum RotationOrder {
+    XYZ,
+    XZY,
+    YXZ,
+    YZX,
+    ZXY,
+    ZYX,
+}
+
 structstruck::strike! {
     #[strikethrough[derive(Debug, Serialize, Deserialize)]]
     pub struct Node {
@@ -119,7 +129,7 @@ structstruck::strike! {
         pub r#type: String,
         pub label: String,
         pub parent: Option<String>,
-        pub rotation_order: String,
+        pub rotation_order: RotationOrder,
         pub inherits_scale: bool,
         pub center_point: Vec<Handle>,
         pub end_point: Vec<Handle>,
@@ -148,8 +158,8 @@ structstruck::strike! {
         pub id: String,
         pub node: String,
         pub node_weights: pub struct {
-            count: i32,
-            values: Vec<(i32, f32)>,
+            pub count: i32,
+            pub values: Vec<(i32, f32)>,
         },
     }
 }

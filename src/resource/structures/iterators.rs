@@ -1,6 +1,9 @@
+use std::marker::PhantomData;
+
 use crate::resource::mesh::indexing::*;
 use crate::resource::mesh::connectivity::{ConnectivityInfo};
 use crate::resource::mesh::Mesh;
+use crate::resource::skin::{Transform, Bone, Rig};
 
 use super::traversal::Walker;
 
@@ -18,6 +21,48 @@ pub struct VertexHalfedgeIter<'a> {
     walker: Walker<'a>,
     start: HalfEdgeID,
     is_done: bool,
+}
+
+pub struct BreadthFirstIterator<R: Rig<S, T>, S: Transform, T: Bone<S>> {
+    s: PhantomData<S>,
+    t: PhantomData<T>, 
+    pub rig: R,
+    pub visited: Vec<usize>,
+    pub queue: Vec<usize>,
+}
+
+impl<R: Rig<S, T>, S: Transform, T: Bone<S>> BreadthFirstIterator<R, S, T> {
+    pub fn new(rig: R, root: usize) -> Self {
+        let queue = vec![root];
+        BreadthFirstIterator {
+            s: PhantomData,
+            t: PhantomData,
+            rig,
+            visited: Vec::new(),
+            queue,
+        }
+    }
+}
+
+pub struct DepthFirstIterator<R: Rig<S, T>, S: Transform, T: Bone<S>> {
+    s: PhantomData<S>,
+    t: PhantomData<T>, 
+    pub rig: R,
+    pub visited: Vec<usize>,
+    pub queue: Vec<usize>,
+}
+
+impl<R: Rig<S, T>, S: Transform, T: Bone<S>> DepthFirstIterator<R, S, T> {
+    pub fn new(rig: R, root: usize) -> Self {
+        let queue = vec![root];
+        DepthFirstIterator {
+            s: PhantomData,
+            t: PhantomData,
+            rig,
+            visited: Vec::new(),
+            queue,
+        }
+    }
 }
 
 impl<'a> VertexHalfedgeIter<'a> {

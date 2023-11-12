@@ -1,11 +1,12 @@
 mod camera;
 pub use camera::*;
+use glam::Mat4;
 use rayon::prelude::*;
 
 // Much of this was directly based on:
 // https://github.com/adrien-ben/gltf-viewer-rs/blob/master/model/src/mesh.rs
 
-use crate::resource::{mesh, material};
+use crate::resource::{mesh, material, skin::{Skin, VulkanSkin, Rig, RigParser}, DepthFirstIterator};
 pub use mesh::*;
 pub use material::*;
 pub mod daz;
@@ -19,10 +20,15 @@ use gltf::{
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use self::daz::format::{RigV1, BoneV1, DazRigParserV1};
+
 pub struct Scene {
     pub meshes: Vec<Mesh>,
     pub vulkan_meshes: Vec<Box<VulkanMesh>>,
+    pub skins: Vec<Skin>,
+    pub vulkan_skins: Vec<VulkanSkin>,
     pub materials: Vec<MaterialInfo>,
+    pub rigs: Vec<RigV1<Mat4, BoneV1<Mat4>>>,
     pub material_buffer: Buffer,
     pub camera: Option<Camera>,
     pub textures: Vec<Texture2d>,
@@ -239,6 +245,9 @@ fn load_glts(context: Arc<Context>, filepath: &PathBuf) -> Result<Scene, Box<dyn
     Ok(Scene {
         meshes,
         vulkan_meshes,
+        skins: Vec::new(),
+        vulkan_skins: Vec::new(),
+        rigs: Vec::new(),
         materials,
         material_buffer,
         camera,
@@ -254,6 +263,8 @@ fn load_daz(context: Arc<Context>, filepath: &PathBuf) -> Result<Scene, Box<dyn 
             return Err(err);
         }
     };
+    // TODO: eliminate this clone
+    let rigs: Vec<RigV1<glam::Mat4, BoneV1<glam::Mat4>>> = DazRigParserV1::parse(&dsf).iter().map(|r| r.as_ref().unwrap().clone()).collect();
     let meshes: Vec<Mesh> = dsf.geometry_library.iter().map(|geo| {
 
         // we need to go through the mesh by indices so we can be sure to only handle triangles
@@ -287,6 +298,7 @@ fn load_daz(context: Arc<Context>, filepath: &PathBuf) -> Result<Scene, Box<dyn 
                 uv: glam::vec4(0.0, 0.0, 0.0, 0.0),
             }
         }).collect::<Vec<ModelVertex>>();
+
 
         // index_buffer.par_iter()
         // .collect::<Vec<_>>()
@@ -377,9 +389,20 @@ fn load_daz(context: Arc<Context>, filepath: &PathBuf) -> Result<Scene, Box<dyn 
     );
     let vulkan_meshes: Vec<Box<VulkanMesh>> = meshes.iter().map(|mesh| Box::new(mesh.to_vulkan_mesh(context.clone()))).collect();
 
+    let mut skins: Vec<Skin> = dsf.skins();
+    skins.iter_mut().zip(rigs.iter()).for_each(|(skin, rig)| {
+        skin.inverse_bind_matrices = rig.get_bones().iter().map(|bone| {
+            bone.inverse_bind_matrix
+        }).collect();
+    });
+    let vulkan_skins = skins.iter().map(|skin| VulkanSkin::from_data(context.clone(), format!("vk_{}", skin.name), skin)).collect();
+
     Ok(Scene {
         meshes: meshes,
         vulkan_meshes,
+        skins,
+        rigs,
+        vulkan_skins,
         materials: materials,
         material_buffer: material_buffer,
         camera: Some(Camera::new(glam::vec2(1280.0, 720.0))),

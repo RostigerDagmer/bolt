@@ -11,6 +11,7 @@ pub struct BufferInfo<'a> {
     pub mem_usage: MemoryLocation,
     pub memory_type_bits: Option<u32>,
     pub index_type: Option<vk::IndexType>,
+    pub vertex_input_rate: Option<vk::VertexInputRate>,
 }
 
 impl Default for BufferInfo<'_> {
@@ -21,6 +22,7 @@ impl Default for BufferInfo<'_> {
             mem_usage: MemoryLocation::CpuToGpu,
             memory_type_bits: None,
             index_type: None,
+            vertex_input_rate: None,
         }
     }
 }
@@ -118,7 +120,7 @@ impl Buffer {
         if info.memory_type_bits.is_some() {
             requirements.memory_type_bits |= info.memory_type_bits.unwrap();
         }
-
+        
         let allocation = context.allocator()
             .lock()
             .unwrap()

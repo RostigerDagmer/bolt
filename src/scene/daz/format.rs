@@ -1,98 +1,21 @@
 use std::marker::PhantomData;
-use std::ops::Mul;
+use std::ops::{Mul, Add};
 use std::{collections::HashMap, error::Error};
 use std::fmt::{Debug, Formatter};
 
-use super::DSF;
+use crate::resource::{BreadthFirstIterator, DepthFirstIterator};
+use crate::resource::skin::{Transform, Bone, RigParser, Rig, RotationOrder};
+
+use super::{DSF, dsf};
 use super::dsf::Handle;
+use ahash::HashSet;
 use glam::*;
 use rayon::prelude::*;
 
-pub trait Transform: Mul<Output = Self> + Sized + Clone + Send + Sync{
-    fn from_mat4(mat: Mat4) -> Self;
-    fn from_scale_rotation_translation(scale: Vec3, orientation:Vec3, rotation: Vec3, translation: Vec3) -> Self;
-    fn get_position(&self) -> Vec3;
-    fn get_rotation(&self) -> Vec3;
-    fn get_scale(&self) -> Vec3;
-    fn get_matrix(&self) -> Mat4;
-    fn get_inverse(&self) -> Mat4;
-    fn get_inverse_transpose(&self) -> Mat4;
-    fn get_d_quat(&self) -> (Quat, Quat);
-    fn zero() -> Self;
-}
-
-impl Transform for Mat4 {
-    fn from_mat4(mat: Mat4) -> Self {
-        mat
-    }
-    fn from_scale_rotation_translation(scale: Vec3, orientation:Vec3, rotation: Vec3, translation: Vec3) -> Self {
-        Mat4::from_scale_rotation_translation(scale, Quat::from_rotation_arc(orientation, rotation), translation)
-    }
-    fn get_position(&self) -> Vec3 {
-        self.w_axis.xyz()
-    }
-    fn get_rotation(&self) -> Vec3 {
-        self.w_axis.xyz()
-    }
-    fn get_scale(&self) -> Vec3 {
-        self.w_axis.xyz()
-    }
-    fn get_matrix(&self) -> Mat4 {
-        *self
-    }
-    fn get_inverse(&self) -> Mat4 {
-        self.inverse()
-    }
-    fn get_inverse_transpose(&self) -> Mat4 {
-        self.inverse().transpose()
-    }
-    fn get_d_quat(&self) -> (Quat, Quat) {
-        let real = glam::Quat::from_mat4(self);
-        // super ugly because the type stored in the matrix is not known
-        let mut v = glam::Vec4::ZERO;
-        let z = self.z_axis.xyz();
-        v[1] = z.x;
-        v[2] = z.y;
-        v[3] = z.z;
-        let dual = glam::Quat::from_vec4(v);
-        (real, dual)
-    }
-    fn zero() -> Self {
-        Mat4::IDENTITY
-    }
-}
 
 
-pub trait Bone<T: Transform>: Clone + Send + Sync {
-    fn from(name: String, id: String, label: String, index: usize, parent: Option<usize>, children: Vec<String>, center_point: Vec3, end_point: Vec3, local_transform: T, global_transform: T) -> Self;
-    fn get_name(&self) -> &str;
-    fn get_id(&self) -> &str;
-    fn get_index(&self) -> usize;
-    fn get_parent(&self) -> Option<usize>;
-    fn set_parent(&mut self, parent: Option<usize>);
-    fn get_children(&self) -> Vec<String>;
-    fn get_child_count(&self) -> usize;
-    fn get_local_transform(&self) -> &T;
-    fn get_global_transform(&self, chain_transform: T) -> T;
-    fn add_child(&mut self, child: String);
-}
-
-pub trait Rig<S: Transform, T: Bone<S>>: IntoIterator<Item = T> + Clone {
-    fn get_root_bone(&self) -> &T;
-    fn get_bones(&self) -> &Vec<T>;
-    fn get_bone(&self, name: &str) -> Option<&T>;
-    fn get_bone_by_id(&self, id: &str) -> Option<&T>;
-    fn get_bone_by_index(&self, index: usize) -> Option<&T>;
-    fn get_bone_count(&self) -> usize;
-}
-
-type GenericRig<S, T> = Box<dyn Rig<S, T, IntoIter = DepthFirstIterator<S, T>>>;
-pub trait RigParser<S: Transform, T: Bone<S>, V: Rig<S, T>> {
-    fn parse(file: &DSF) -> Result<V, Box<dyn Error>>;
-}
-
-pub struct DazRigParserV1<S: Transform, T: Bone<S>, V> {
-    rig: PhantomData<V>,
+pub struct DazRigParserV1<R: Rig<S, T>, S: Transform, T: Bone<S>> {
+    rig: PhantomData<R>,
     transform: PhantomData<S>,
     bone: PhantomData<T>,
 }
@@ -101,97 +24,167 @@ fn handle_to_vec(handle: Vec<Handle>) -> Vec3 {
     Vec3::new(handle[0].value, handle[1].value, handle[2].value)
 }
 
-impl<S: Transform + 'static, T: Bone<S> + 'static> RigParser<S, T, RigV1<S, T>> for DazRigParserV1<S, T, RigV1<S, T>> {
+fn degrees_to_radians(degrees: Vec3) -> Vec3 {
+    Vec3::new(degrees.x.to_radians(), degrees.y.to_radians(), degrees.z.to_radians())
+}
 
-    fn parse(file: &DSF) -> Result<RigV1<S,T>, Box<dyn Error>> {
-        let mut bone_map: HashMap<String, usize> = HashMap::new();
-        let mut children_map: HashMap<String, Vec<String>> = HashMap::new();
-        let bones = file
-        .node_library
-        .iter()
-        .filter(|n| n.r#type == "bone")
-        .collect::<Vec<&super::dsf::Node>>()
-        .par_iter()
-        .enumerate()
-        .map(|(i, n)| {
-            let parent = if let Some(parent) = &n.parent {
-                // parent is a fragment (#name)
-                // we have to strip the hash
-                let parent_name = parent.strip_prefix("#");
-                parent_name
-                // let parent_idx = bone_map.get(parent_name.unwrap_or(parent));
-                // parent_idx.map(|idx| *idx)
-            } else {
-                // root_bone = i;
-                None
-            };
-            let bone = T::from(
-                n.name.clone(),
-                n.id.clone(),
-                n.label.clone(),
-                i,
-                None,
-                Vec::new(),
-                handle_to_vec(n.center_point.clone()),
-                handle_to_vec(n.end_point.clone()),
-                S::from_scale_rotation_translation(
-                    handle_to_vec(n.scale.clone()),
-                    handle_to_vec(n.orientation.clone()),
-                    handle_to_vec(n.rotation.clone()),
-                    handle_to_vec(n.translation.clone()),
-                ),
-                S::zero(), // this can not be know before sweeping through the hierarchy once
-            );
-            // bone_map.insert(n.id.clone(), i);
-            (bone, parent)
-        })
-        .collect::<Vec<(T, Option<&str>)>>();
-        if bones.is_empty() {
-            return Err("No rig found in file".into());
-        }
-        // collect bones vector into bone_map and add parents
-        let mut bones = bones.iter().map(|(bone, parent)| {
-            if let Some(parent) = parent.map(|p| p.to_string()) {
-                let mut b = bone.clone();
-                b.set_parent(bone_map.get(&parent).copied());
-                bone_map.insert(bone.get_id().to_string(), bone.get_index());
-                return b
-            }
-            bone.clone()
+fn radians_to_degrees(radians: Vec3) -> Vec3 {
+    Vec3::new(radians.x.to_degrees(), radians.y.to_degrees(), radians.z.to_degrees())
+}
+
+impl<S: Transform, T: Bone<S>> RigParser<RigV1<S, T>, S, T> for DazRigParserV1<RigV1<S, T>, S, T> {
+
+    fn parse(file: &DSF) -> Vec<Result<RigV1<S,T>, Box<dyn Error>>> {
+        file.modifier_library.iter().map(|m| {
+            let joint_names = m.skin.joints.iter().map(|j| j.node.strip_prefix("#").unwrap().to_string()).collect::<HashSet<_>>();
             
-        }).collect::<Vec<_>>();
-
-        //let (bones, _) = bones.into_iter().unzip::<T, Option<&str>, Vec<T>, Vec<Option<&str>>>();
-        //collect children into children_map
-        for bone in bones.iter() {
-            if let Some(parent) = bone.get_parent() {
-                let parent_name = bones.get(parent).unwrap().get_name().to_string();
-                children_map.entry(parent_name).or_insert(Vec::new()).push(bone.get_name().to_string());
+            println!("joint_names: {:?}", joint_names);
+            let mut bone_map: HashMap<String, usize> = HashMap::new();
+            let mut children_map: HashMap<String, Vec<String>> = HashMap::new();
+            let bones = file
+            .node_library
+            .iter()
+            .filter(|n| n.r#type == "bone" && joint_names.contains(&n.name))
+            .collect::<Vec<&super::dsf::Node>>()
+            .par_iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let parent = if let Some(parent) = &n.parent {
+                    // parent is a fragment (#name)
+                    // we have to strip the hash
+                    let parent_name = parent.strip_prefix("#");
+                    parent_name
+                    // let parent_idx = bone_map.get(parent_name.unwrap_or(parent));
+                    // parent_idx.map(|idx| *idx)
+                } else {
+                    // root_bone = i;
+                    None
+                };
+    
+                let scale = handle_to_vec(n.scale.clone());
+                let orientation = degrees_to_radians(handle_to_vec(n.orientation.clone()));
+                let rotation = degrees_to_radians(handle_to_vec(n.rotation.clone()));
+                let translation = handle_to_vec(n.translation.clone());
+                
+                // print!("bone {:?}", n.name);
+                // print!("scale: {:?};\n orientation: {:?};\n rotation: {:?};\n translation: {:?}\n", scale, orientation, rotation, translation); 
+                
+    
+                let bone = T::from(
+                    n.name.clone(),
+                    n.id.clone(),
+                    n.label.clone(),
+                    i,
+                    None,
+                    Vec::new(),
+                    handle_to_vec(n.center_point.clone()),
+                    handle_to_vec(n.end_point.clone()),
+                    S::from_scale_rotation_translation(
+                        scale,
+                        orientation,
+                        rotation,
+                        translation,
+                        n.rotation_order.into(),
+                    ),
+                    S::from_scale_rotation_translation(
+                        scale, 
+                        orientation,
+                        rotation,
+                        handle_to_vec(n.center_point.clone()), 
+                        n.rotation_order.into()
+                    ), // initialize with bind pose
+                );
+                // print!("yielded local_transform: {:?}\n", bone.get_local_transform());
+    
+                (bone, parent)
+            })
+            .collect::<Vec<(T, Option<&str>)>>();
+    
+            if bones.is_empty() {
+                return Err("No rig found in file".into());
             }
-        }
-
-        // sweep through the hierarchy and add children to parents
-        for (parent_name, children) in children_map {
-            let parent_idx = bone_map.get(&parent_name);
-            match parent_idx {
-                Some(idx) => {
-                    let parent = bones.get_mut(*idx).unwrap();
-                    for child in children {
-                        parent.add_child(child);
-                    }
-                },
-                None => {
-                    println!(" (X) couldn't index {:?} in bone array at [{:?}] even though it was retrieved from bone map", parent_name, parent_idx);
+            // collect bones vector into bone_map and add parents
+            let mut bones = bones.iter().map(|(bone, parent)| {
+                if let Some(parent) = parent.map(|p| p.to_string()) {
+                    let mut b = bone.clone();
+                    b.set_parent(bone_map.get(&parent).copied());
+                    bone_map.insert(bone.get_id().to_string(), bone.get_index());
+                    return b
+                }
+                bone.clone()
+                
+            }).collect::<Vec<_>>();
+    
+            //let (bones, _) = bones.into_iter().unzip::<T, Option<&str>, Vec<T>, Vec<Option<&str>>>();
+            //collect children into children_map
+            for bone in bones.iter() {
+                if let Some(parent) = bone.get_parent() {
+                    let parent_name = bones.get(parent).unwrap().get_name().to_string();
+                    children_map.entry(parent_name).or_insert(Vec::new()).push(bone.get_name().to_string());
                 }
             }
-        }
-
-        Ok(RigV1 {
-            bone_map,
-            bones: bones,
-            root_transform: S::zero(),
-            root_bone: 0,
-        })
+    
+            // sweep through the hierarchy and add children to parents
+            for (parent_name, children) in children_map {
+                let parent_idx = bone_map.get(&parent_name);
+                match parent_idx {
+                    Some(idx) => {
+                        let parent = bones.get_mut(*idx).unwrap();
+                        for child in children {
+                            parent.add_child(child);
+                        }
+                    },
+                    None => {
+                        println!(" (X) couldn't index {:?} in bone array at [{:?}] even though it was retrieved from bone map", parent_name, parent_idx);
+                    }
+                }
+            }
+    
+            // calculate local transforms (local_transform_bone = inv(global_transform_parent) * global_transform_bone)
+            // for bone in bones.iter_mut() {
+            //     if let Some(parent) = bone.get_parent() {
+            //         let parent_global_transform = bones[parent].global_transform().clone();
+            //         let local_transform = bone.get_global_transform(&parent_global_transform.get_inverse());
+            //         bone.set_local_transform(local_transform);
+            //     }
+            // }
+            let transforms = bones.iter().map(|bone| {
+                match bone.get_parent() {
+                    Some(parent) => {
+                        (Some(bones.get(parent).unwrap_or(bone).global_transform().clone()), bone.global_transform().clone())
+                    }
+                    None => {
+                        // TODO: get the root transform from the scene if possible
+                        (None, bone.global_transform().clone())
+                    }
+                }
+            }).collect::<Vec<_>>();
+    
+            transforms
+            .iter()
+            .enumerate()
+            .for_each(|(i, (parent_transform, global_transform))| {
+                match parent_transform {
+                    Some(parent_transform) => {
+                        let t = global_transform.mul(parent_transform.get_inverse::<S>());
+                        bones[i].set_local_transform(t);
+                        bones[i].set_inverse_bind_matrix(t.get_inverse());
+                    },
+                    None => {
+                        bones[i].set_local_transform(*global_transform);
+                        bones[i].set_inverse_bind_matrix(global_transform.get_inverse());
+                    }
+                }
+            });
+            Ok(
+                RigV1 {
+                    bone_map,
+                    bones: bones,
+                    root_transform: S::identity(),
+                    root_bone: 0,
+                }
+            )
+        }).collect::<Vec<_>>()
     }
 }
 
@@ -207,31 +200,15 @@ pub struct RigV1<S: Transform, T: Bone<S>> {
 
 impl<S: Transform, T: Bone<S>> IntoIterator for RigV1<S, T> {
     type Item = T;
-    type IntoIter = BreadthFirstIterator<S, T>;
+    type IntoIter = BreadthFirstIterator<RigV1<S, T>, S, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         let start = self.root_bone;
-        BreadthFirstIterator {
-            rig: self,
-            visited: Vec::new(),
-            queue: vec![start],
-        }
+        BreadthFirstIterator::new(self, start)
     }
 }
 
-pub struct BreadthFirstIterator<S: Transform, T: Bone<S>> {
-    rig: RigV1<S, T>,
-    visited: Vec<usize>,
-    queue: Vec<usize>,
-}
-
-pub struct DepthFirstIterator<S: Transform, T: Bone<S>> {
-    rig: RigV1<S, T>,
-    visited: Vec<usize>,
-    queue: Vec<usize>,
-}
-
-impl<S: Transform, T: Bone<S>> Iterator for BreadthFirstIterator<S, T> {
+impl<R: Rig<S, T>, S: Transform, T: Bone<S>> Iterator for BreadthFirstIterator<R, S, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -239,7 +216,7 @@ impl<S: Transform, T: Bone<S>> Iterator for BreadthFirstIterator<S, T> {
             return None;
         }
         let next = self.queue.remove(0);
-        let bone = self.rig.bones[next].clone();
+        let bone = self.rig.get_bones()[next].clone();
         self.visited.push(next);
         for child in bone.get_children() {
             let id = self.rig.get_bone(&child).unwrap().get_index();
@@ -251,7 +228,7 @@ impl<S: Transform, T: Bone<S>> Iterator for BreadthFirstIterator<S, T> {
     }
 }
 
-impl<S: Transform, T: Bone<S>> Iterator for DepthFirstIterator<S, T> {
+impl<R: Rig<S, T>, S: Transform, T: Bone<S>> Iterator for DepthFirstIterator<R, S, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -259,7 +236,7 @@ impl<S: Transform, T: Bone<S>> Iterator for DepthFirstIterator<S, T> {
             return None;
         }
         let next = self.queue.remove(0);
-        let bone = self.rig.bones[next].clone();
+        let bone = self.rig.get_bones()[next].clone();
         self.visited.push(next);
         for child in bone.get_children() {
             let id = self.rig.get_bone(&child).unwrap().get_index();
@@ -297,6 +274,20 @@ impl<S: Transform, T: Bone<S>> Rig<S, T> for RigV1<S, T> {
     }
     fn get_bone_count(&self) -> usize {
         self.bones.len()
+    }
+    fn local_to_global(&self, index: usize) -> S {
+        let mut acc = self.bones[index].get_local_transform().to_owned();
+        let mut bone_index = index;
+        loop {
+            match self.bones[bone_index].get_parent() {
+                Some(parent) => {
+                    acc = acc.mul(self.bones[parent].get_local_transform().to_owned());
+                    bone_index = parent;
+                },
+                None => break,
+            }
+        }
+        acc 
     }
 }
 
@@ -337,6 +328,7 @@ pub struct BoneV1<T: Transform> {
     pub end_point: Vec3,
     pub local_transform: T,
     pub global_transform: T,
+    pub inverse_bind_matrix: T,
 }
 
 impl<T: Transform + Mul> Bone<T> for BoneV1<T> {
@@ -363,6 +355,7 @@ impl<T: Transform + Mul> Bone<T> for BoneV1<T> {
             end_point,
             local_transform,
             global_transform,
+            inverse_bind_matrix: local_transform.get_inverse(),
         }
     }
     fn get_name(&self) -> &str {
@@ -389,16 +382,35 @@ impl<T: Transform + Mul> Bone<T> for BoneV1<T> {
     fn get_local_transform(&self) -> &T {
         &self.local_transform
     }
-    fn get_global_transform(&self, chain_transform: T) -> T {
-        chain_transform.mul(self.local_transform.clone())
+
+    fn set_local_transform(&mut self, local_transform: T) {
+        self.local_transform = local_transform;
     }
+
+    fn set_inverse_bind_matrix(&mut self, inverse_bind_matrix: T) {
+        self.inverse_bind_matrix = inverse_bind_matrix;
+    }
+
+    fn get_global_transform(&self, chain_transform: &T) -> T {
+        chain_transform.mul(self.local_transform)
+    }
+
+    fn set_global_transform(&mut self, global_transform: T) {
+        self.global_transform = global_transform;
+    }
+
+    fn global_transform(&self) -> &T {
+        &self.global_transform
+    }
+
     fn add_child(&mut self, child: String) {
         self.children.push(child);
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug)]
 pub struct TransformV1 {
+    pub rotation_order: RotationOrder,
     pub orientation: Vec3,
     pub rotation: Vec3,
     pub translation: Vec3,
@@ -412,6 +424,13 @@ impl Mul for TransformV1 {
     }
 }
 
+impl Add for TransformV1 {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        Self::from_mat4(self.get_matrix().add_mat4(&rhs.get_matrix()))
+    }
+}
+
 impl Transform for TransformV1 {
     fn from_mat4(mat: Mat4) -> Self {
         let (scale, rotation, translation) = mat.to_scale_rotation_translation();
@@ -421,14 +440,16 @@ impl Transform for TransformV1 {
         let orientation = r_ / (phi / 2.0).sin();
         let rotation = orientation * phi;
         TransformV1 {
+            rotation_order: RotationOrder::XYZ,
             orientation,
             rotation,
             translation,
             scale,
         }
     }
-    fn from_scale_rotation_translation(scale: Vec3, orientation:Vec3, rotation: Vec3, translation: Vec3) -> Self {
+    fn from_scale_rotation_translation(scale: Vec3, orientation:Vec3, rotation: Vec3, translation: Vec3, rotation_order: RotationOrder) -> Self {
         TransformV1 {
+            rotation_order,
             orientation,
             rotation,
             translation,
@@ -447,8 +468,8 @@ impl Transform for TransformV1 {
     fn get_matrix(&self) -> Mat4 {
         Mat4::from_scale_rotation_translation(self.scale, Quat::from_rotation_arc(self.orientation, self.rotation), self.translation)
     }
-    fn get_inverse(&self) -> Mat4 {
-        self.get_matrix().inverse()
+    fn get_inverse<T: Transform>(&self) -> T {
+        T::from_mat4(self.get_matrix().inverse())
     }
     fn get_inverse_transpose(&self) -> Mat4 {
         self.get_matrix().inverse().transpose()
@@ -459,6 +480,7 @@ impl Transform for TransformV1 {
 
     fn zero() -> Self {
         Self {
+            rotation_order: RotationOrder::XYZ,
             orientation: Vec3::ZERO,
             rotation: Vec3::ZERO,
             translation: Vec3::ZERO,

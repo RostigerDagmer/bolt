@@ -25,6 +25,13 @@ pub struct ModelVertex {
 
 #[repr(C)]
 #[derive(Clone, Debug, Copy)]
+pub struct DebugVertex {
+    pub pos: glam::Vec4,
+    pub color: glam::Vec4,
+}
+
+#[repr(C)]
+#[derive(Clone, Debug, Copy)]
 struct PhysicsPointProperties {
     pub mass: f32,
     pub velocity: glam::Vec3,
@@ -80,6 +87,24 @@ impl Vertex for ModelVertex {
         ]
     }
 }
+
+impl Vertex for DebugVertex {
+    fn stride() -> u32 {
+        std::mem::size_of::<DebugVertex>() as u32
+    }
+    fn format_offset() -> Vec<(vk::Format, u32)> {
+        vec![
+            (
+                vk::Format::R32G32B32A32_SFLOAT,
+                offset_of!(DebugVertex, pos) as u32,
+            ),
+            (
+                vk::Format::R32G32B32A32_SFLOAT,
+                offset_of!(DebugVertex, color) as u32,
+            ),
+        ]
+    }
+}   
 
 pub struct VulkanMesh {
     pub context: Arc<Context>,

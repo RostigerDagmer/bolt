@@ -220,10 +220,13 @@ pub struct PipelineInfo {
     pub depth_test_enabled: bool,
     pub depth_write_enabled: bool,
     pub blend_mode: PipelineBlendMode,
+    pub polygon_mode: vk::PolygonMode,
     pub cull_mode: vk::CullModeFlags,
     pub front_face: vk::FrontFace,
+    pub instance_stride: u32,
     pub vertex_stride: u32,
-    pub vertex_format_offset: Vec<(vk::Format, u32)>,
+    pub vertex_format_offset: Vec<(vk::Format, u32)>, // format and offset
+    pub vertex_instance_attributes: Vec<(vk::Format, u32)>,
     pub samples: vk::SampleCountFlags,
     pub specialization_data: Vec<u8>,
     pub specialization_entries: Vec<vk::SpecializationMapEntry>,
@@ -241,10 +244,13 @@ impl Default for PipelineInfo {
             depth_test_enabled: true,
             depth_write_enabled: true,
             blend_mode: PipelineBlendMode::default(),
+            polygon_mode: vk::PolygonMode::FILL,
             cull_mode: vk::CullModeFlags::BACK,
             front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+            instance_stride: 0,
             vertex_stride: 0,
             vertex_format_offset: Vec::new(),
+            vertex_instance_attributes: Vec::new(),
             samples: vk::SampleCountFlags::TYPE_1,
             specialization_data: Vec::new(),
             specialization_entries: Vec::new(),
@@ -283,6 +289,12 @@ impl PipelineInfo {
         self.shaders.push((path, vk::ShaderStageFlags::FRAGMENT));
         self
     }
+
+    pub fn polygon_mode(mut self, polygon_mode: vk::PolygonMode) -> Self {
+        self.polygon_mode = polygon_mode;
+        self
+    }
+
     pub fn cull_mode(mut self, cull_mode: vk::CullModeFlags) -> Self {
         self.cull_mode = cull_mode;
         self
@@ -303,6 +315,31 @@ impl PipelineInfo {
         self.vertex_format_offset = T::format_offset();
         self
     }
+
+    pub fn instance_type<T>(mut self) -> Self
+    where
+        T: Vertex,
+    {
+        self.instance_stride = T::stride();
+        self.vertex_instance_attributes = T::format_offset();
+        self
+    }
+
+    pub fn vertex_stride(mut self, stride: u32) -> Self {
+        self.vertex_stride = stride;
+        self
+    }
+
+    pub fn instance_stride(mut self, stride: u32) -> Self {
+        self.instance_stride = stride;
+        self
+    }
+
+    pub fn vertex_format_offset(mut self, format_offset: Vec<(vk::Format, u32)>) -> Self {
+        self.vertex_format_offset = format_offset;
+        self
+    }
+
     pub fn specialization<T>(mut self, data: &T, constant_id: u32) -> Self {
         let slice = unsafe {
             std::slice::from_raw_parts(data as *const T as *const u8, std::mem::size_of_val(data))
@@ -360,11 +397,31 @@ impl Pipeline {
             }
             shaders.push(shader);
         }
-        let vertex_input_binding_descriptions = [vk::VertexInputBindingDescription {
-            binding: 0,
-            stride: info.vertex_stride,
-            input_rate: vk::VertexInputRate::VERTEX,
-        }];
+        let vertex_input_binding_descriptions = [
+            vk::VertexInputBindingDescription {
+                binding: 0,
+                stride: info.vertex_stride,
+                input_rate: vk::VertexInputRate::VERTEX,
+            },
+            vk::VertexInputBindingDescription {
+                binding: 1,
+                stride: info.instance_stride,
+                input_rate: vk::VertexInputRate::INSTANCE,
+            },
+        ];
+        // let mut vertex_input_binding_descriptions = Vec::new();
+        // for (i, input_rate_stride) in info.vertex_inputrate_stride.iter().enumerate() {
+        //     let mut stride = input_rate_stride.1;
+        //     if stride <= 0 {
+        //         stride = info.vertex_stride;
+        //     } 
+        //     vertex_input_binding_descriptions.push(vk::VertexInputBindingDescription {
+        //         binding: i as u32,
+        //         stride: stride,
+        //         input_rate: input_rate_stride.0,
+        //     });
+        // }
+
         let mut vertex_input_attribute_descriptions = Vec::new();
         for (i, format_pair) in info.vertex_format_offset.iter().enumerate() {
             vertex_input_attribute_descriptions.push(vk::VertexInputAttributeDescription {
@@ -374,6 +431,16 @@ impl Pipeline {
                 offset: format_pair.1,
             });
         }
+        let o = vertex_input_attribute_descriptions.len() as u32;
+        for (i, format_pair) in info.vertex_instance_attributes.iter().enumerate() {
+            vertex_input_attribute_descriptions.push(vk::VertexInputAttributeDescription {
+                location: i as u32 + o as u32,
+                binding: 1,
+                format: format_pair.0,
+                offset: format_pair.1,
+            });
+        }
+
         let vertex_input_state_info = vk::PipelineVertexInputStateCreateInfo {
             vertex_attribute_description_count: vertex_input_attribute_descriptions.len() as u32,
             p_vertex_attribute_descriptions: vertex_input_attribute_descriptions.as_ptr(),
@@ -395,7 +462,7 @@ impl Pipeline {
         let rasterization_info = vk::PipelineRasterizationStateCreateInfo {
             front_face: info.front_face,
             line_width: 1.0,
-            polygon_mode: vk::PolygonMode::FILL,
+            polygon_mode: info.polygon_mode,
             cull_mode: info.cull_mode,
             ..Default::default()
         };

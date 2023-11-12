@@ -1,0 +1,227 @@
+#version 460
+
+struct ModelVertex {
+	vec4 pos;
+	vec4 color;
+	vec4 normal;
+	vec4 uv;
+};
+
+struct Joint {
+    mat4 transform;
+};
+
+struct SkinJoint {
+    uint joint_id;
+    uint vertex_id;
+    float weight;
+};
+
+layout(set=1, binding = 0) buffer Vertices { ModelVertex v[]; } vertices;
+layout(set=1, binding = 1) buffer Indices { uint i[]; } indices; 
+layout(set=1, binding = 2) buffer Joints { Joint j[]; } joints;
+layout(set=1, binding = 3) buffer SkinningWeights { SkinJoint s[]; } skinning_weights;
+layout(set=1, binding = 4) buffer IBMs { mat4 m[]; } inverse_bind_matrices;
+
+layout(push_constant) uniform Constants {
+    uint weights_count;
+    uint vertex_count;
+} consts;
+
+void main() {
+
+    uint index = gl_GlobalInvocationID.z * gl_WorkGroupSize.x * gl_WorkGroupSize.y
+        + gl_GlobalInvocationID.y * gl_WorkGroupSize.x 
+        + gl_GlobalInvocationID.x;
+
+    if (index > consts.weights_count) {
+        return;
+    }    
+
+    SkinJoint j = skinning_weights.s[index];
+    Joint t = joints.j[j.joint_id];
+	mat4 ibm = inverse_bind_matrices.m[j.joint_id];
+
+    ModelVertex v = vertices.v[j.vertex_id];
+
+    vertices.v[j.vertex_id].pos = mix(v.pos, t.transform * ibm * v.pos, j.weight);
+}
+
+/*
+struct inputs
+{
+	vec4 position : POSITION;
+	vec4 normal : NORMAL;
+	vec4 weights : TEXCOORD1;
+	vec4 matrixIndices : TEXCOORD2;	
+};
+
+struct outputs	
+{
+	vec4 hPosition : POSITION;
+	vec4 hNormal : TEXCOORD1;
+};
+
+mat3x4 DQToMatrix(vec4 Qn, vec4 Qd)
+{	
+	mat3x4 M;
+	float len2 = dot(Qn, Qn);
+	float w = Qn.x, x = Qn.y, y = Qn.z, z = Qn.w;
+	float t0 = Qd.x, t1 = Qd.y, t2 = Qd.z, t3 = Qd.w;
+		
+	M[0][0] = w*w + x*x - y*y - z*z; M[0][1] = 2*x*y - 2*w*z; M[0][2] = 2*x*z + 2*w*y;
+	M[1][0] = 2*x*y + 2*w*z; M[1][1] = w*w + y*y - x*x - z*z; M[1][2] = 2*y*z - 2*w*x; 
+	M[2][0] = 2*x*z - 2*w*y; M[2][1] = 2*y*z + 2*w*x; M[2][2] = w*w + z*z - x*x - y*y;
+	
+	M[0][3] = -2*t0*x + 2*w*t1 - 2*t2*z + 2*y*t3;
+	M[1][3] = -2*t0*y + 2*t1*z - 2*x*t3 + 2*w*t2;
+	M[2][3] = -2*t0*z + 2*x*t2 + 2*w*t3 - 2*t1*y;
+	
+	M /= len2;
+	
+	return M;	
+}
+
+// basic dual quaternion skinning:
+outputs dqs(inputs IN,
+			uniform mat4 modelViewProj,
+			uniform mat4 modelViewIT,
+			uniform mat2x4 boneDQ[100])
+{
+	outputs OUT;					
+		
+	mat2x4 blendDQ = IN.weights.x*boneDQ[IN.matrixIndices.x];
+	blendDQ += IN.weights.y*boneDQ[IN.matrixIndices.y];
+	blendDQ += IN.weights.z*boneDQ[IN.matrixIndices.z];
+	blendDQ += IN.weights.w*boneDQ[IN.matrixIndices.w];	
+	
+	mat3x4 M = DQToMatrix(blendDQ[0], blendDQ[1]);
+	vec3 position = mul(M, IN.position);
+	vec3 normal = mul(M, IN.normal);
+		
+	OUT.hPosition = mul(modelViewProj, vec4(position, 1.0));
+	OUT.hNormal = mul(modelViewIT, vec4(normal, 0.0));
+	
+	return OUT;			
+}
+
+// per-vertex antipodality handling (this is the most robust, but not the most efficient way):
+outputs dqsAntipod(inputs IN,
+			uniform mat4 modelViewProj,
+			uniform mat4 modelViewIT,
+			uniform mat2x4 boneDQ[100])
+{
+	outputs OUT;					
+		
+	mat2x4 dq0 = boneDQ[IN.matrixIndices.x];
+	mat2x4 dq1 = boneDQ[IN.matrixIndices.y];
+	mat2x4 dq2 = boneDQ[IN.matrixIndices.z];
+	mat2x4 dq3 = boneDQ[IN.matrixIndices.w];
+
+	if (dot(dq0[0], dq1[0]) < 0.0) dq1 *= -1.0;
+	if (dot(dq0[0], dq2[0]) < 0.0) dq2 *= -1.0;	
+	if (dot(dq0[0], dq3[0]) < 0.0) dq3 *= -1.0;
+	
+	mat2x4 blendDQ = IN.weights.x*dq0;
+	blendDQ += IN.weights.y*dq1;
+	blendDQ += IN.weights.z*dq2;
+	blendDQ += IN.weights.w*dq3;
+	
+	mat3x4 M = DQToMatrix(blendDQ[0], blendDQ[1]);
+	vec3 position = mul(M, IN.position);
+	vec3 normal = mul(M, IN.normal);
+		
+	OUT.hPosition = mul(modelViewProj, vec4(position, 1.0));
+	OUT.hNormal = mul(modelViewIT, vec4(normal, 0.0));
+	
+	return OUT;			
+}
+
+// optimized version (avoids dual quaternion - matrix conversion):
+outputs dqsFast(inputs IN,
+			uniform mat4 modelViewProj,
+			uniform mat4 modelViewIT,
+			uniform mat2x4 boneDQ[100])
+{
+	outputs OUT;			
+		
+	mat2x4 blendDQ = IN.weights.x*boneDQ[IN.matrixIndices.x];
+	blendDQ += IN.weights.y*boneDQ[IN.matrixIndices.y];
+	blendDQ += IN.weights.z*boneDQ[IN.matrixIndices.z];
+	blendDQ += IN.weights.w*boneDQ[IN.matrixIndices.w];	
+		
+	float len = length(blendDQ[0]);
+	blendDQ /= len;
+
+	vec3 position = IN.position.xyz + 2.0*cross(blendDQ[0].yzw, cross(blendDQ[0].yzw, IN.position.xyz) + blendDQ[0].x*IN.position.xyz);
+	vec3 trans = 2.0*(blendDQ[0].x*blendDQ[1].yzw - blendDQ[1].x*blendDQ[0].yzw + cross(blendDQ[0].yzw, blendDQ[1].yzw));
+	position += trans;
+
+	vec3 inpNormal = IN.normal.xyz;
+	vec3 normal = inpNormal + 2.0*cross(blendDQ[0].yzw, cross(blendDQ[0].yzw, inpNormal) + blendDQ[0].x*inpNormal);
+
+	OUT.hPosition = mul(modelViewProj, vec4(position, 1.0));
+	OUT.hNormal = mul(modelViewIT, vec4(normal, 0.0));
+		
+	return OUT;
+}
+
+mat3 adjointTransposeMatrix(mat3 M)
+{
+	mat3 atM;
+	atM._m00 = M._m22 * M._m11 - M._m12 * M._m21;
+	atM._m01 = M._m12 * M._m20 - M._m10 * M._m22;
+	atM._m02 = M._m10 * M._m21 - M._m20 * M._m11;
+
+	atM._m10 = M._m02 * M._m21 - M._m22 * M._m01;
+	atM._m11 = M._m22 * M._m00 - M._m02 * M._m20;
+	atM._m12 = M._m20 * M._m01 - M._m00 * M._m21;
+
+	atM._m20 = M._m12 * M._m01 - M._m02 * M._m11;
+	atM._m21 = M._m10 * M._m02 - M._m12 * M._m00;
+	atM._m22 = M._m00 * M._m11 - M._m10 * M._m01;
+
+	return atM;
+}
+
+// two-phase skinning: dqsFast combined with scale/shear transformations:
+outputs dqsScale(inputs IN,
+			uniform mat4 modelViewProj,
+			uniform mat4 modelViewIT,
+			uniform mat2x4 boneDQ[100],
+			uniform mat3x4 scaleM[100])
+{
+	outputs OUT;			
+
+	// first pass:
+	mat3x4 blendS = IN.weights.x*scaleM[IN.matrixIndices.x];
+	blendS += IN.weights.y*scaleM[IN.matrixIndices.y];
+	blendS += IN.weights.z*scaleM[IN.matrixIndices.z];
+	blendS += IN.weights.w*scaleM[IN.matrixIndices.w];	
+		
+	vec3 pass1_position = mul(blendS, IN.position);
+	mat3 blendSrotAT = adjointTransposeMatrix(mat3(blendS));
+	vec3 pass1_normal = normalize(mul(blendSrotAT, IN.normal.xyz));
+		
+	// second pass:
+	mat2x4 blendDQ = IN.weights.x*boneDQ[IN.matrixIndices.x];
+	blendDQ += IN.weights.y*boneDQ[IN.matrixIndices.y];
+	blendDQ += IN.weights.z*boneDQ[IN.matrixIndices.z];
+	blendDQ += IN.weights.w*boneDQ[IN.matrixIndices.w];	
+		
+	float len = length(blendDQ[0]);
+	blendDQ /= len;
+
+	vec3 position = pass1_position + 2.0*cross(blendDQ[0].yzw, cross(blendDQ[0].yzw, pass1_position) + blendDQ[0].x*pass1_position);
+	vec3 trans = 2.0*(blendDQ[0].x*blendDQ[1].yzw - blendDQ[1].x*blendDQ[0].yzw + cross(blendDQ[0].yzw, blendDQ[1].yzw));
+	position += trans;
+
+	vec3 normal = pass1_normal + 2.0*cross(blendDQ[0].yzw, cross(blendDQ[0].yzw, pass1_normal) + blendDQ[0].x*pass1_normal);
+
+	OUT.hPosition = mul(modelViewProj, vec4(position, 1.0));
+	OUT.hNormal = mul(modelViewIT, vec4(normal, 0.0));
+		
+	return OUT;
+}
+
+*/

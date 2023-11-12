@@ -3,6 +3,8 @@ use std::error::Error;
 use std::path::PathBuf;
 
 use bolt;
+use bolt::resource::BreadthFirstIterator;
+use bolt::resource::skin::{RigParser, Bone};
 use bolt::scene::daz::{format::*, read_from_dsf};
 use glam::Mat4;
 use url::Url;
@@ -22,39 +24,61 @@ fn test_read_dsf(path: &PathBuf) -> Result<bolt::scene::daz::dsf::DSF, Box<dyn E
     //file
 }
 
-// fn test_rig_parsing() {
-//     let file = test_read_dsf();
-//     type RigSetup = DazRigParserV1<Mat4, BoneV1<Mat4>, RigV1<Mat4, BoneV1<Mat4>>>;
-//     let rig = RigSetup::parse(&file).unwrap();
-//     println!("bones: {:?}", rig.bone_map);
+fn test_rig_parsing() {
+    let path = &bolt::util::find_asset("models/Genesis9.dsf").unwrap();
+    let file = test_read_dsf(path);
+    type RigSetup = DazRigParserV1<RigV1<Mat4, BoneV1<Mat4>>, Mat4, BoneV1<Mat4>>;
+    let rigs = RigSetup::parse(&file.unwrap());
+    for rig in rigs {
+        let rig = rig.unwrap();
+        println!("bones: {:?}", rig.bone_map);
+        for bone in rig.into_iter() {
+            println!("bone: {:?}", bone.get_local_transform());
+        }
+    }
 
-//     //root children
-//     //let root_bone = rig.root_bone;
-//     println!("pelvis parent: {:?}", rig.bones.get(1).unwrap().parent);
-
-//     // println!{"len bonemap: {:?}", rig.bone_map.into_keys().len().clone()}
-//     // println!{"len bones: {:?}", rig.bones.len()}
-//     // println!{"root index: {:?}", rig.root_bone}
-//     defer_print!();
-//     add_branch!("Rig");
-//     // println!("bone children count: {:?}", rig.get_bones()
-//     // .iter()
-//     // .map(|b| {
-//     //     (b.name.clone(), b.get_child_count())
-//     // })
-//     // .collect::<Vec<(String, usize)>>());
-//     let local_transforms = rig.into_iter().fold(Vec::new(), |mut acc, x| {
-//         if x.get_child_count() == 0 {
-//             add_leaf!("{}", x.get_name());
-//         } else {
-//             add_branch!("{}", x.get_name());
-//         }
-//         acc.push(x.get_local_transform().clone());
-//         acc
-//     });
     
-//     println!("Transforms-----------------------------\n{:?}", local_transforms);
-// }
+    // print all bones with their children
+
+    // defer_print!();
+    // add_branch!("Rig");
+
+    // for (name, bone_id) in rig.bone_map.iter() {
+    //     let bone = rig.bones.get(*bone_id).unwrap();
+    //     add_branch!("{}", bone.get_name());
+    //     if (bone.get_child_count() == 0) {
+    //         add_leaf!("{}", bone.get_name());   
+    //     }
+    // }
+
+    // rig.into_iter().for_each(|bone| {
+    //     // add_branch!("{}", bone.get_name());
+    //     // if (bone.get_child_count() == 0) {
+    //     //     add_leaf!("{}", bone.get_name());   
+    //     // }
+    //     println!("bone: {:?}", bone.get_name());
+    //     println!("bone children: {:?}", bone.get_children());   
+    // }); 
+
+
+    // let global_transforms = rig.into_iter().fold(Vec::new(), |mut acc, x| {
+    //     let last_transform = acc.last();
+    //     match last_transform {
+    //         Some(t) => {
+    //             acc.push(x.get_global_transform(t));
+    //             acc
+    //         },
+    //         None => {
+    //             acc.push(*x.global_transform());
+    //             acc
+    //         }
+    //     }
+    // });
+
+    
+    // println!("Transforms-----------------------------\n{:?}", global_transforms);
+    
+}
 
 
 fn test_material_parsing() {
@@ -89,12 +113,29 @@ fn test_material_parsing() {
     //println!("node materials: {:?}", file.scene.materials);
 }   
 
+
+fn test_skins() {
+    let path = &bolt::util::find_asset("models/Genesis9.dsf").unwrap();
+    let file = test_read_dsf(path).unwrap();
+    let skins = file.skins();
+
+    println!("skins: {:?}", skins[0].transforms.iter().filter_map(|t| {
+        if (*t != Mat4::IDENTITY) {
+            Some(t)
+        } else {
+            None
+        }
+    }).collect::<Vec<_>>());
+}
+
 fn main() {
     //let daz_install_path = String::from("C:/Daz 3D/Applications/Data/DAZ 3D/My DAZ 3D Library");
     // let fpath = &bolt::util::find_asset("models/Genesis 9.duf").unwrap();
 
     // let res = bolt::scene::daz::load::build_daz(fpath);
     // println!("{:?}", res);
-    test_material_parsing();
+    // test_material_parsing();
+    test_rig_parsing();
+    // test_skins();
 
 }

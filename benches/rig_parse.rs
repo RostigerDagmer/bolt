@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use bolt::AppSettings;
 use bolt::SharedContext;
+use bolt::resource::skin::RigParser;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use ash::vk;
 use bolt::scene::*;
@@ -13,7 +14,7 @@ use glam::Mat4;
 // single threaded one rig 540us
 // multi threaded one rig 250us
 fn test_parse(file: &DSF) {
-    type RigSetup = DazRigParserV1<Mat4, BoneV1<Mat4>, RigV1<Mat4, BoneV1<Mat4>>>;
+    type RigSetup = DazRigParserV1<RigV1<Mat4, BoneV1<Mat4>>, Mat4, BoneV1<Mat4>>;
     let res = RigSetup::parse(black_box(&file));
     // match res {
     //     Ok(_) => println!("parsing successful"),

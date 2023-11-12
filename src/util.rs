@@ -65,6 +65,198 @@ fn get_cube_face_colors() -> [glam::Vec4;6] {
 }
 
 
+pub fn cube_vertices(scale: f32) -> [BasicVertex; 36] {
+    let colors = get_cube_face_colors();
+    // green face
+    [
+        BasicVertex {
+            pos: vec4(-1.0, -1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[0],
+            uv: vec2(1.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, 1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[0],
+            uv: vec2(0.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, -1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[0],
+            uv: vec2(1.0, 0.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, -1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[0],
+            uv: vec2(1.0, 0.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, 1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[0],
+            uv: vec2(0.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, 1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[0],
+            uv: vec2(0.0, 0.0),
+        },
+        // yellow face
+        BasicVertex {
+            pos: vec4(-1.0, -1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[1],
+            uv: vec2(1.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, -1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[1],
+            uv: vec2(0.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, 1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[1],
+            uv: vec2(1.0, 0.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, 1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[1],
+            uv: vec2(1.0, 0.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, -1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[1],
+            uv: vec2(0.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, 1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[1],
+            uv: vec2(0.0, 0.0),
+        },
+        // orange face
+        BasicVertex {
+            pos: vec4(-1.0, 1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[2],
+            uv: vec2(1.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, -1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[2],
+            uv: vec2(0.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, 1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[2],
+            uv: vec2(1.0, 0.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, 1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[2],
+            uv: vec2(1.0, 0.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, -1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[2],
+            uv: vec2(0.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, -1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[2],
+            uv: vec2(0.0, 0.0),
+        },
+        // dark blue face
+        BasicVertex {
+            pos: vec4(1.0, 1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[3],
+            uv: vec2(1.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, 1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[3],
+            uv: vec2(0.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, -1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[3],
+            uv: vec2(1.0, 0.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, -1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[3],
+            uv: vec2(1.0, 0.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, 1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[3],
+            uv: vec2(0.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, -1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[3],
+            uv: vec2(0.0, 0.0),
+        },
+        // red face
+        BasicVertex {
+            pos: vec4(1.0, 1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[4],
+            uv: vec2(1.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, 1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[4],
+            uv: vec2(0.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, 1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[4],
+            uv: vec2(1.0, 0.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, 1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[4],
+            uv: vec2(1.0, 0.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, 1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[4],
+            uv: vec2(0.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, 1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[4],
+            uv: vec2(0.0, 0.0),
+        },
+        // wintergreen face
+        BasicVertex {
+            pos: vec4(1.0, -1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[5],
+            uv: vec2(1.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, -1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[5],
+            uv: vec2(0.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, -1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[5],
+            uv: vec2(1.0, 0.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, -1.0, 1.0, 1.0 / scale) * scale,
+            color: colors[5],
+            uv: vec2(1.0, 0.0),
+        },
+        BasicVertex {
+            pos: vec4(1.0, -1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[5],
+            uv: vec2(0.0, 1.0),
+        },
+        BasicVertex {
+            pos: vec4(-1.0, -1.0, -1.0, 1.0 / scale) * scale,
+            color: colors[5],
+            uv: vec2(0.0, 0.0),
+        },
+    ]
+}
+
 pub fn colored_cube_vertices() -> [BasicVertex; 36] {
     let colors = get_cube_face_colors();
     // green face
