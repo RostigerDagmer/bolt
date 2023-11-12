@@ -1,4 +1,5 @@
 /target
 /assets/models
 /assets/textures
+/assets/fonts
 *.ipynb

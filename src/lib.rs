@@ -29,6 +29,7 @@ pub mod debug;
 pub mod compute_pipeline;
 pub mod compute_pass;
 pub mod sort;
+pub mod ui;
 
 pub use crate::buffer::*;
 pub use crate::context::*;

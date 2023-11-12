@@ -50,6 +50,7 @@ impl Image2d {
 
             // Allocate and bind memory to image
             let requirements = context.device().get_image_memory_requirements(image);
+            println!("image requirements: {:?}", requirements);
             let alloc = context.allocator()
                 .lock()
                 .unwrap()
