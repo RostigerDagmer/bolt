@@ -38,7 +38,7 @@ void main()
     float height = glyph_wh_atlas.y / 1024.0;
     float atlas_x = glyph_wh_atlas.z / 1024.0;
     float atlas_y = glyph_wh_atlas.w / 1024.0;
-    gl_Position = scene.projection * scene.view * (pos + vec4(glyph_transform_col4.x / 25.0, 0.0, 0.0, 0.0)); // * glyph_transform * pos;
+    gl_Position = scene.projection * scene.view * glyph_transform * pos; // * glyph_transform * pos;
     fragTexCoord = vec2(atlas_x + inUv.x * width, atlas_y + inUv.y * height);
     outColor = inColor;
 }

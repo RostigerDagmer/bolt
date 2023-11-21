@@ -80,10 +80,11 @@ pub struct GlyphAtlas {
     pub buffer: Buffer,
     pub current_layout: vk::ImageLayout,
     pub sampler: vk::Sampler,
+    pub font_data: Vec<u8>,
 }
 
 impl GlyphAtlas {
-    pub fn new(context: Arc<Context>, sdfs: Vec<(char, Metrics, Vec<f64>)>) -> Self {
+    pub fn new(context: Arc<Context>, sdfs: Vec<(char, Metrics, Vec<f64>)>, font_data: Vec<u8>) -> Self {
         let mut glyphs = HashMap::new();
 
         // Define texture size
@@ -206,7 +207,8 @@ impl GlyphAtlas {
             glyphs,
             buffer,
             current_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            sampler 
+            sampler,
+            font_data, 
         }
         
     }
@@ -217,6 +219,18 @@ impl GlyphAtlas {
         .image_view(self.texture.get_image_view())
         .image_layout(self.current_layout)
         .build()
+    }
+
+    pub fn font_face(&self) -> Option<ttf_parser::Face<'_>> {
+        match ttf_parser::Face::parse(&self.font_data, 0) {
+            Ok(face) => Some(face),
+            Err(_) => None,
+        }
+    }
+
+    pub fn kerning_table(&self) -> Option<ttf_parser::kern::Table> {
+        let fontface = self.font_face()?;
+        fontface.tables().kern
     }
 
     // pub fn transition(&mut self, cmd: vk::CommandBuffer, layout: vk::ImageLayout) {
@@ -259,7 +273,7 @@ pub fn ftt_to_atlas(context: Arc<Context>, path: &PathBuf) -> GlyphAtlas {
     // load binary data from path to font file
     let font_data = std::fs::read(path).unwrap();
 
-    let font = fontdue::Font::from_bytes(font_data, fontdue::FontSettings::default()).unwrap();
+    let font = fontdue::Font::from_bytes(font_data.clone(), fontdue::FontSettings::default()).unwrap();
     // Rasterize and get the layout metrics for the letter 'g' at 17px.
     let res = 64.0;
     let radius = 8;
@@ -276,6 +290,6 @@ pub fn ftt_to_atlas(context: Arc<Context>, path: &PathBuf) -> GlyphAtlas {
         (c, metrics, sdfbm.render_sdf(radius))
     }).collect::<Vec<_>>();
 
-    GlyphAtlas::new(context.clone(), sdfs)
+    GlyphAtlas::new(context.clone(), sdfs, font_data)
 
 }

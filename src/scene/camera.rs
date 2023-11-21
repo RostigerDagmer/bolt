@@ -70,7 +70,7 @@ impl Camera {
             vfov: 35.0,
             min_vfov: 1.0,
             max_vfov: 160.0,
-            z_near: 0.1,
+            z_near: 0.01,
             z_far: 100.0,
             view_matrix: Mat4::IDENTITY,
             persp_matrix: Mat4::IDENTITY,
