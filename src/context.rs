@@ -212,7 +212,8 @@ fn create_logical_device_with_graphics_queue(
 
     let device_features = vk::PhysicalDeviceFeatures::builder()
         .sampler_anisotropy(true)
-        .shader_int64(true);
+        .shader_int64(true)
+        .fragment_stores_and_atomics(true);
 
     let mut vulkan12_features = vk::PhysicalDeviceVulkan12Features::builder()
         .shader_subgroup_extended_types(true)

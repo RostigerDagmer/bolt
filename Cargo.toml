@@ -27,6 +27,8 @@ gpu-allocator = "0.18.0"
 shaderc = { version = "0.8.1", features=["build-from-source"] }
 glam = { version = "0.22", features = ["serde"] }
 gltf = "1.0.0"
+harfbuzz_rs = "2.0.1"
+harfbuzz-sys = "0.5.0"
 num_cpus = "1.15.0"
 # msdf = "0.2.1" <- does not build on windows
 # mint = "0.5.9"

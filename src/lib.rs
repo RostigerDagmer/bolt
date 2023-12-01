@@ -30,6 +30,7 @@ pub mod compute_pipeline;
 pub mod compute_pass;
 pub mod sort;
 pub mod ui;
+pub mod mesh_pipeline;
 
 pub use crate::buffer::*;
 pub use crate::context::*;
@@ -44,6 +45,7 @@ pub use crate::window::*;
 pub use crate::compute_pipeline::*;
 pub use crate::sort::*;
 pub use crate::compute_pass::*;
+pub use crate::mesh_pipeline::*;
 pub use ash;
 pub use glam;
 pub use winit;

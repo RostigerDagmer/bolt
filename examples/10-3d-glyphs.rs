@@ -36,6 +36,7 @@ pub struct AppData {
     pub pipeline_layout: bolt::PipelineLayout,
     pub pass_layout: bolt::DescriptorSetLayout,
     pub graphics_pipeline: bolt::Pipeline,
+    pub geometry_pipeline: bolt::MeshPipeline,
     pub per_frame: Vec<PerFrameData>,
     pub manip: scene::CameraManip,
 }
@@ -46,6 +47,7 @@ pub struct AppDataBuilder<'a> {
     // all fields of AppData but Optional
     pub ui: Option<ui::UI>,
     pub graphics_pipeline: Option<bolt::Pipeline>,
+    pub geometry_pipeline: Option<bolt::MeshPipeline>,
     pub desc_set_layout: Option<bolt::DescriptorSetLayout>,
     pub pass_layout: Option<bolt::DescriptorSetLayout>,
     pub pipeline_layout: Option<bolt::PipelineLayout>,
@@ -59,6 +61,7 @@ impl<'b: 'a, 'a> AppDataBuilder<'a> {
             app: app,
             ui: None,
             graphics_pipeline: None,
+            geometry_pipeline: None,
             desc_set_layout: None,
             pass_layout: None,
             pipeline_layout: None,
@@ -107,6 +110,17 @@ impl<'b: 'a, 'a> AppDataBuilder<'a> {
         self
     }
 
+    fn geometry_pipeline<F: FnOnce(bolt::MeshPipelineInfo) -> bolt::MeshPipelineInfo>(mut self, pipeline_opts: F) -> Self {
+        self.geometry_pipeline = Some(bolt::MeshPipeline::new(
+            self.app.renderer.context.clone(),
+            pipeline_opts(
+                bolt::MeshPipelineInfo::default()
+                .layout(self.pipeline_layout.as_ref().expect("specify a pipeline layout before building the pipeline").handle())
+            )
+        ));
+        self
+    }
+
     fn pass_layout(mut self, info: bolt::DescriptorSetLayoutInfo) -> Self {
         self.pass_layout = Some(bolt::DescriptorSetLayout::new(
             self.app.renderer.context.clone(),
@@ -139,6 +153,7 @@ impl<'b: 'a, 'a> AppDataBuilder<'a> {
             ui: self.ui.expect("specify a UI before building the app data"),
             glyph_geometry,
             graphics_pipeline: self.graphics_pipeline.expect("specify a graphics pipeline before building the app data"),
+            geometry_pipeline: self.geometry_pipeline.expect("specify a geometry pipeline before building the app data"),
             desc_set_layout: self.desc_set_layout.expect("specify a descriptor set layout before building the app data"),
             pass_layout: self.pass_layout.expect("specify a descriptor set layout for the render pass before building the app data"),
             pipeline_layout: self.pipeline_layout.expect("specify a pipeline layout before building the app data"),
@@ -169,7 +184,7 @@ impl Vertex for JointTransform {
 pub fn setup(app: &mut bolt::App) -> AppData {
 
     let mut ui = ui::UI::new(app.renderer.context.clone());
-    ui.add_text(ui::Text { text: "Hello World! ".to_string(), font_size: 16.0, color: glam::vec4(0.0, 0.0, 0.0, 1.0), transform: glam::Mat4::IDENTITY });
+    ui.add_text(ui::Text { text: "Hello World!".to_string(), font_size: 32.0, color: glam::vec4(0.0, 0.0, 0.0, 1.0), transform: glam::Mat4::IDENTITY });
 
     let mut camera = scene::Camera::new( app.window.get_size());
     camera.look_at(vec3(5.0, 2.5, 5.0), vec3(0.0, 0.0, 0.0), -Vec3::Y);
@@ -328,7 +343,7 @@ pub fn prepare() -> bolt::AppSettings {
         name: "Model App".to_string(),
         resolution: [1500, 800],
         render: bolt::RendererSettings {
-            samples: 4,
+            samples: 8,
             clear_color: Vec4::splat(0.15),
             ..Default::default()
         },

@@ -7,6 +7,8 @@ use fontdue::Metrics;
 use sdf_glyph_renderer::BitmapGlyph;
 use rayon::prelude::*;
 
+pub mod parsing;
+
 use crate::{Texture2d, Context, Image2d, Buffer, Resource, Vertex, offset_of, resource::mesh::ModelVertex};
 
 #[derive(Clone, Copy, Debug)]
@@ -88,7 +90,7 @@ impl GlyphAtlas {
         let mut glyphs = HashMap::new();
 
         // Define texture size
-        let (atlas_width, atlas_height) = (1024 as u32, 1024 as u32);
+        let (atlas_width, atlas_height) = (2048 as u32, 2048 as u32);
         let mut data = vec![0.0; (atlas_width * atlas_height) as usize];  // Allocate space for the atlas
 
         let mut current_x: u32 = 0;
@@ -182,13 +184,13 @@ impl GlyphAtlas {
         let sampler_create_info = vk::SamplerCreateInfo::builder()
             .min_filter(vk::Filter::LINEAR)
             .mag_filter(vk::Filter::LINEAR)
-            .address_mode_u(vk::SamplerAddressMode::REPEAT)
-            .address_mode_v(vk::SamplerAddressMode::REPEAT)
-            .address_mode_w(vk::SamplerAddressMode::REPEAT)
-            .border_color(vk::BorderColor::FLOAT_OPAQUE_BLACK)
+            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .border_color(vk::BorderColor::FLOAT_TRANSPARENT_BLACK)
             .anisotropy_enable(true)
             .max_anisotropy(16.0)
-            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+            .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
             .min_lod(0.0)
             .max_lod(1 as f32)
             .compare_enable(false)
@@ -259,8 +261,13 @@ pub fn extend_bitmap(bitmap: Vec<u8>, metrics: Metrics, size: usize) -> Vec<u8> 
     return new_bitmap;
 }
 
+
+// pub fn enumerate_ascii_chars() -> impl Iterator<Item = char> {
+//     (0..128).into_iter().map(|i| i as u8 as char)
+// }
+
 pub fn enumerate_ascii_chars() -> impl Iterator<Item = char> {
-    (0..128).into_iter().map(|i| i as u8 as char)
+    " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~".chars()
 }
 
 pub fn ftt_to_atlas(context: Arc<Context>, path: &PathBuf) -> GlyphAtlas {
@@ -275,7 +282,7 @@ pub fn ftt_to_atlas(context: Arc<Context>, path: &PathBuf) -> GlyphAtlas {
 
     let font = fontdue::Font::from_bytes(font_data.clone(), fontdue::FontSettings::default()).unwrap();
     // Rasterize and get the layout metrics for the letter 'g' at 17px.
-    let res = 64.0;
+    let res = 128.0;
     let radius = 8;
 
     let sdfs = enumerate_ascii_chars().collect::<Vec<_>>().into_par_iter().map(|c| {

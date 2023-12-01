@@ -35,14 +35,12 @@ impl UI {
         let fontface = self.atlas.font_face().unwrap();
         let kerning_table = self.atlas.kerning_table();
         let font_height = fontface.height() as f32;
-        let font_width = fontface.width().to_number() as f32;
-        let glyph_res = 64.0; // todo: move into atlas
+        let units_per_em = fontface.units_per_em() as f32;
+        // let font_width = fontface.width() as f32;
 
         self.text.iter().for_each(|text| {
             // for each character in the text
             let mut off_x = 0.0;
-            // calculate the normalized font scaling
-            let scale = text.font_size * glyph_res / font_height ;
 
             text.text.chars().collect::<Vec<_>>().windows(2).for_each(|c| {
                 // get the glyph from the atlas
@@ -57,26 +55,33 @@ impl UI {
                         0.0
                     }
                 };
-                off_x += glyph.advance;
+                let id = fontface.glyph_index(c1).expect(&format!("index of {:?} not found", c1));
+                let advance = fontface.glyph_hor_advance(id).expect(&format!("advance of {:?} not found", c1)) as f32;
+                let bearing_x = fontface.glyph_hor_side_bearing(id).unwrap_or(0) as f32;
+                let bbox = fontface.glyph_bounding_box(id).unwrap_or(ttf_parser::Rect { x_min: 0, y_min: 0, x_max: 0, y_max: 0 });
+                let width = bbox.width() as f32;
+                let height = bbox.height() as f32; 
+                let ymin = bbox.y_min as f32;
+                let xmin = bbox.x_min as f32;
+
+                off_x += (advance + kerning) / units_per_em;
+
+                let norm_width = (width + bearing_x) / units_per_em;
+                let norm_height = height / units_per_em;
                 
-                // calculate the normalized height
-                let norm_height = glyph.height / font_height * scale;
-                // calculate the normalized width
-                let norm_width = glyph.width / font_height * scale;
-
-                // calculate the normalized offset
-                let norm_off_x = ((off_x + kerning) / font_width) / scale;
-
                 // calculate the baseline offset
-                let baseline_off = (fontface.ascender() as f32 / font_height) * scale;
+                let baseline_off = ymin / units_per_em; 
+                let left_adjustment = (-bearing_x + xmin) / units_per_em;
 
                 // construct the glyph instance with individual transform
-                let transform = text.transform * glam::Mat4::from_translation(glam::Vec3::new(norm_off_x, baseline_off, 0.0));
-                let scale = glam::Mat4::from_scale(glam::Vec3::new(norm_width, -norm_height, 1.0));
+                let transform = text.transform * glam::Mat4::from_translation(glam::Vec3::new(-(off_x + left_adjustment), baseline_off, 0.0));
+                let scale = glam::Mat4::from_scale(glam::Vec3::new(-norm_width, -norm_height, 1.0));
+                
+                let to_geo_origin = glam::Mat4::from_translation(glam::Vec3::new(-1.0, -1.0, 0.0));
 
                 glyphs.push(GlyphInstance {
                     wh_atlas: glam::Vec4::new(glyph.width, glyph.height, glyph.atlas_x, glyph.atlas_y),
-                    transform: text.transform * transform * scale,
+                    transform: text.transform.mul_mat4(&transform.mul_mat4(&scale.mul_mat4(&to_geo_origin))),
                     color: text.color,
                 });
             })

@@ -23,8 +23,11 @@ layout (location = 7) in vec4 glyph_transform_col4;
 layout (location = 8) in vec4 glyph_wh_atlas;
 layout (location = 9) in vec4 glyph_color;
 
-layout(location = 0) out vec2 fragTexCoord;
+layout(location = 0) out smooth vec2 fragTexCoord;
 layout(location = 1) out vec4 outColor;
+layout(location = 2) out vec2 outUv;
+
+const float padding = 8.0;
 
 void main()
 {
@@ -34,11 +37,12 @@ void main()
         glyph_transform_col3,
         glyph_transform_col4
     );
-    float width = glyph_wh_atlas.x / 1024.0;
-    float height = glyph_wh_atlas.y / 1024.0;
-    float atlas_x = glyph_wh_atlas.z / 1024.0;
-    float atlas_y = glyph_wh_atlas.w / 1024.0;
+    float width = (glyph_wh_atlas.x - (2*padding)) / 2048.0;
+    float height = (glyph_wh_atlas.y - (2*padding)) / 2048.0;
+    float atlas_x = (glyph_wh_atlas.z + padding) / 2048.0;
+    float atlas_y = (glyph_wh_atlas.w + padding) / 2048.0;
     gl_Position = scene.projection * scene.view * glyph_transform * pos; // * glyph_transform * pos;
     fragTexCoord = vec2(atlas_x + inUv.x * width, atlas_y + inUv.y * height);
     outColor = inColor;
+    outUv = inUv;
 }

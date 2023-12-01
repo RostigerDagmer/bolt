@@ -4,6 +4,7 @@ use std::{sync::Arc, path::PathBuf};
 
 use bolt::{AppSettings, Window, Context, RendererSettings, SharedContext, AppRenderer, ui::ftt_to_atlas};
 use fontdue::Metrics;
+use harfbuzz_rs::Font;
 use image::{DynamicImage, GenericImage};
 use sdf_glyph_renderer::{BitmapGlyph};
 use ttf_parser::Face;
@@ -94,6 +95,26 @@ fn prepare_context(settings: AppSettings, event_loop: &EventLoop<()>) -> (Window
     (window, shared_context, settings.render.clone())
 }
 
+pub fn harfbuzz_test(unicode_string: &str) {
+    let fontfile = bolt::util::find_asset("fonts/Montserrat/Montserrat-VariableFont_wght.ttf");
+    if fontfile.is_none() {
+        panic!("Could not find font file");
+    }
+    let path = fontfile.unwrap();
+    let font_data = std::fs::read(path).unwrap();
+    
+    // load binary data from path to font file
+    let face = ttf_parser::Face::parse(&font_data, 0).unwrap();
+    use bolt::ui::text::parsing::OutlineBuilder;
+    let mut builder = OutlineBuilder(Vec::new());
+
+    let glyph_id = face.glyph_index('A').unwrap();
+
+    face.outline_glyph(glyph_id, &mut builder);
+    let mut outline = builder.0;
+    println!("outline: {:?}", outline);
+}
+
 fn test_atlas() {
     let (mut window, shared_context, render_settings) = prepare_context(AppSettings::default(), &EventLoop::new());
     let renderer = bolt::AppRenderer::new(&mut window, shared_context.clone(), render_settings);
@@ -103,4 +124,5 @@ fn test_atlas() {
 
 pub fn main() {
     sdf_render_test();
+    harfbuzz_test("Hello World");
 }
