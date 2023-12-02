@@ -480,7 +480,7 @@ impl Pipeline {
         let depth_state_info = vk::PipelineDepthStencilStateCreateInfo {
             depth_test_enable: info.depth_test_enabled as u32,
             depth_write_enable: info.depth_write_enabled as u32,
-            depth_compare_op: vk::CompareOp::LESS_OR_EQUAL,
+            depth_compare_op: vk::CompareOp::GREATER_OR_EQUAL,
             front: noop_stencil_state,
             back: noop_stencil_state,
             max_depth_bounds: 1.0,

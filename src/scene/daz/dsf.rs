@@ -72,6 +72,11 @@ structstruck::strike! {
             pub count: u32,
             pub values: Vec<Vec<u32>>,
         },
+        pub polyline_list: Option<pub struct {
+            pub count: u32,
+            pub segment_count: u32,
+            pub values: Vec<Vec<u32>>,
+        }>,
         pub default_uv_set: String,
         pub root_region: Region,
         pub graft: Option<Value>,

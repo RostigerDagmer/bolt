@@ -66,7 +66,7 @@ impl Camera {
             input: CameraInput::default(),
             position: Vec3::splat(10.0),
             center: Vec3::ZERO,
-            up: -Vec3::Y,
+            up: Vec3::Y,
             vfov: 35.0,
             min_vfov: 1.0,
             max_vfov: 160.0,
@@ -110,13 +110,24 @@ impl Camera {
 
 impl Camera {
     fn update_view(&mut self) {
-        self.view_matrix = Mat4::look_at_rh(self.position, self.center, self.up);
+        self.view_matrix = Mat4::look_at_lh(self.position, self.center, -self.up);
     }
 
     fn update_persp(&mut self) {
         let aspect = self.window_size.x / self.window_size.y;
-        self.persp_matrix =
-            Mat4::perspective_rh(self.vfov.to_radians(), aspect, self.z_near, self.z_far);
+        // self.persp_matrix =
+            // Mat4::perspective_lh(self.vfov.to_radians(), aspect, self.z_near, self.z_far);
+        let h = 1.0 / (self.vfov.to_radians() * 0.5).tan();
+        let w = h / aspect;
+        let a = -self.z_near / (self.z_far - self.z_near);
+        let b = (self.z_near * self.z_far) / (self.z_far - self.z_near);
+
+        let r0 = glam::vec4(w, 0.0, 0.0, 0.0);
+        let r1 = glam::vec4(0.0, -h, 0.0, 0.0);
+        let r2 = glam::vec4(0.0, 0.0, a, 1.0);
+        let r3 = glam::vec4(0.0, 0.0, b, 0.0);
+
+        self.persp_matrix = glam::mat4(r0, r1, r2, r3);
     }
 
     pub fn look_at(&mut self, eye: Vec3, center: Vec3, up: Vec3) {

@@ -85,7 +85,7 @@ impl Swapchain {
                 for _ in 0..present_images.len() {
                     let depth_image_create_info = vk::ImageCreateInfo::builder()
                         .image_type(vk::ImageType::TYPE_2D)
-                        .format(vk::Format::D16_UNORM)
+                        .format(vk::Format::D32_SFLOAT)
                         .extent(window.get_extent_3d())
                         .mip_levels(1)
                         .array_layers(1)

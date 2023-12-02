@@ -388,11 +388,11 @@ impl SharedContext {
                 .message_severity(
                     vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
                         | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                        // | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
                         | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING,
                 )
                 .message_type(vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                    | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                    // | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
                     | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
                 )
                 .pfn_user_callback(Some(vulkan_debug_utils_callback));

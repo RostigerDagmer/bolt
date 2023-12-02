@@ -6,6 +6,6 @@ layout (location = 1) in vec4 inColor;
 layout (location = 0) out vec4 outColor;
 
 void main() {
-    float light = clamp(dot(normalize(inNormal), vec3(0,0,1)),0,1);
+    float light = clamp(dot(normalize(-inNormal), vec3(0,0,1)),0,1);
     outColor = light * inColor;
 }
