@@ -62,16 +62,17 @@ fn calc_mesh_global_transform(gltf: &gltf::Document, mesh_index: usize) -> glam:
 
 
 fn load_textures_par(document: &gltf::Document, filepath: &PathBuf, context: Arc<Context>) -> Vec<Texture2d> {
-    let paths = document.images().map(|im| {
+    let paths = document.images().filter_map(|im| {
         let source = im.source();
         match source {
             gltf::image::Source::View { view, mime_type } => {
                 println!("mime_type: {:?}", mime_type);
-                panic!("loading gltf embedded textures not implemented");
+                // panic!("loading gltf embedded textures not implemented");
+                None
             }
             gltf::image::Source::Uri { uri, mime_type } => {
                 println!("mime_type: {:?}; uri: {:?}", mime_type, uri);
-                return filepath.as_path().parent().unwrap().join(PathBuf::from(uri).as_path()).as_os_str().to_os_string().into_string().unwrap() // PathBuf::from(uri).as_path();
+                return Some(filepath.as_path().parent().unwrap().join(PathBuf::from(uri).as_path()).as_os_str().to_os_string().into_string().unwrap()) // PathBuf::from(uri).as_path();
             }
         }
     })
@@ -87,16 +88,17 @@ fn load_textures_par(document: &gltf::Document, filepath: &PathBuf, context: Arc
 }
 
 fn load_textures_lin(document: &gltf::Document, filepath: &PathBuf, context: Arc<Context>) -> Vec<Texture2d> {
-    document.images().map(|image| {
+    document.images().filter_map(|image| {
         let source = image.source();
         match source {
             gltf::image::Source::View { view, mime_type } => {
                 println!("mime_type: {:?}", mime_type);
-                panic!("loading gltf embedded textures not implemented");
+                // panic!("loading gltf embedded textures not implemented");
+                None
             }
             gltf::image::Source::Uri { uri, mime_type } => {
                 println!("mime_type: {:?}; uri: {:?}", mime_type, uri);
-                return Texture2d::new(context.clone(), filepath.as_path().parent().unwrap().join(PathBuf::from(uri).as_path()));
+                return Some(Texture2d::new(context.clone(), filepath.as_path().parent().unwrap().join(PathBuf::from(uri).as_path())));
             }
         }
     }).collect()
@@ -112,7 +114,6 @@ fn load_glts(context: Arc<Context>, filepath: &PathBuf) -> Result<Scene, Box<dyn
             return Err(Box::new(e));
         }
     };
-    println!("filepath: {:?}", filepath.as_path().parent());
     
     let textures = load_textures_par(&gltf, filepath, context.clone());
     println!("textures loaded");
@@ -352,7 +353,9 @@ fn load_daz(context: Arc<Context>, filepath: &PathBuf) -> Result<Scene, Box<dyn 
 
 pub fn load_scene(context: Arc<Context>, filepath: &PathBuf) -> Scene {
     // TODO: make this chain of responsibility
-    let scene = match filepath.extension().unwrap().to_str().unwrap() {
+    println!("Loading scene: {:?}", filepath);
+
+    let scene = match filepath.extension().expect("fileextension im arsch").to_str().expect("to_str im arsch") {
         "gltf" => load_glts(context.clone(), filepath),
         "glb" => load_glts(context.clone(), filepath),
         "dsf" => load_daz(context.clone(), filepath),

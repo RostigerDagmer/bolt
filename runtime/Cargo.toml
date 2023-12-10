@@ -1,0 +1,16 @@
+[package]
+name = "runtime"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+crossbeam = "0.8.2"
+parking_lot = "0.12.1"
+nohash-hasher = "0.2.0"
+polling = "3.3.1"
+
+#test dependencies
+[dev-dependencies]
+rand = "0.8.4"

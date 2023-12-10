@@ -10,8 +10,9 @@ use winit::{
 };
 use futures_lite::{future::FutureExt, pin};
 
-use std::{ops::Drop, sync::{Arc, Mutex}, future::Future, borrow::BorrowMut, pin::Pin};
+use std::{ops::Drop, sync::Arc, future::Future, borrow::BorrowMut, pin::Pin};
 use std::time::{Duration, SystemTime};
+use parking_lot::Mutex;
 
 mod buffer;
 mod context;
@@ -88,7 +89,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn build<T>(setup: SetupFn<T>) -> AppBuilder<T> {
+    pub fn build<T, W: WindowEventHandler<T>>(setup: SetupFn<T>) -> AppBuilder<T, W> {
         AppBuilder {
             prepare: None,
             setup,
@@ -99,11 +100,13 @@ impl App {
     }
 
     pub async fn new(settings: AppSettings) -> Self {
+        println!("ay");
         let mut window = Window::new(
             settings.resolution[0],
             settings.resolution[1],
             settings.name.clone(),
         ).await;
+        println!("Window created");
         // create the context
 
         let (shared_context, queue_manager) = create_shared_context_and_queue_manager(&mut window, &settings.render.clone());
@@ -125,11 +128,13 @@ impl App {
     }
 }
 
-pub type PrepareFn = fn() -> AppSettings;
-pub type SetupFn<T> = fn(&mut App) -> T; // TODO: how do we specify FnOnce here?
+pub type PrepareFn = fn() -> Pin<Box<dyn futures::Future<Output = AppSettings>>>;
+pub type SetupFn<T> = fn(&mut App) -> Pin<Box<dyn futures::Future<Output = T> + '_>>; // TODO: how do we specify FnOnce here?
 pub type UpdateFn<T> = fn(&mut App, &mut T);
-pub type RenderFn<T> = fn(&mut App, &mut T) -> Pin<Box<dyn futures::Future<Output = Result<(), AppRenderError>>>>;
-pub type WindowEventFn<T> = fn(&mut App, &mut T, target: &EventLoopWindowTarget);
+pub type RenderFn<T> = fn(Arc<Mutex<App>>, Arc<Mutex<T>>) -> Pin<Box<dyn futures::Future<Output = Result<(), AppRenderError>>>>;
+pub trait WindowEventHandler<T> {
+    async fn window_event<'a, 'b>(&self, data: &'a mut T, target: &'b async_winit::window::Window<ThreadUnsafe>);
+}
 
 #[derive(Clone, Debug)]
 pub struct AppSettings {
@@ -150,15 +155,15 @@ impl Default for AppSettings {
         }
     }
 }
-pub struct AppBuilder<T: 'static> {
+pub struct AppBuilder<T: 'static, W: WindowEventHandler<T> + 'static> {
     pub prepare: Option<PrepareFn>,
     pub setup: SetupFn<T>,
     pub update: Option<UpdateFn<T>>,
-    pub window_event: Option<WindowEventFn<T>>,
+    pub window_event: Option<W>,
     pub render: Option<RenderFn<T>>,
 }
 
-impl<T> AppBuilder<T> {
+impl<T, W: WindowEventHandler<T> + 'static> AppBuilder<T, W> {
     pub fn prepare(mut self, prepare: PrepareFn) -> Self {
         self.prepare = Some(prepare);
         self
@@ -174,46 +179,88 @@ impl<T> AppBuilder<T> {
         self
     }
 
-    pub fn window_event(mut self, window_event: WindowEventFn<T>) -> Self {
+    pub fn window_event(mut self, window_event: W) -> Self {
         self.window_event = Some(window_event);
         self
     }
 
-    pub fn run(self) {
-        main_loop(self);
+    pub async fn run(self) {
+        println!("Running app");
+        main_loop(self).await;
     }
 }
 
-async fn main_loop<T: 'static>(builder: AppBuilder<T>) {
+async fn main_loop<T: 'static, W: WindowEventHandler<T>>(builder: AppBuilder<T, W>) {
     let event_loop = EventLoop::<ThreadUnsafe>::new();
     let mut settings = AppSettings::default();
     match builder.prepare {
         Some(prepare) => {
-            settings = prepare();
+            settings = prepare().await;
         }
         None => {}
     }
-    let mut app = App::new(settings).await;
-    let mut app_data = (builder.setup)(&mut app);
-    let mut dirty_swapchain = false;
-    
-
-    let now = SystemTime::now();
-    let mut modifiers = ModifiersState::default();
     let window_target = event_loop.window_target().clone();
-
+    
     event_loop.block_on(async move {
+        let mut app = App::new(settings).await;
+        let mut app_data = (builder.setup)(&mut app).await;
+        let mut dirty_swapchain = false;
+        let now = SystemTime::now();
+        let mut modifiers = ModifiersState::default();
+        let render_fn = builder.render.unwrap();
+        let mut app_data = Arc::new(Mutex::new(app_data));
+        let window = app.window.handle().clone();
+        let device = app.renderer.context.device().clone();
+        let mut app = Arc::new(Mutex::new(app));
         loop {
-            let window = app.window.handle().clone();
-            let device = app.renderer.context.device().clone();
+            println!("rendarin da renda loop");
             if !window.is_minimized().await.unwrap() {
-                window_target.resumed().await;
+                println!("not minimized");
+                // window_target.resumed().await;
+                println!("here");
                 if dirty_swapchain {
-                    app.recreate_swapchain();
+                    app.lock().recreate_swapchain();
                     dirty_swapchain = false;
                 }
+                match (builder.window_event) {
+                    Some(ref handler) => {
+                        let mut guard = app_data.lock();
+                        handler.window_event(guard.borrow_mut(), &window);
+                    }
+                    None => {}
+                }
+                // window.redraw_requested().await;
+                println!("here2");
+                let now = now.elapsed().unwrap();
+                if app.lock().elapsed_ticks % 10 == 0 {
+                    let mut guard = app.lock();
+                    let cpu_time = now.as_millis() as f32 - guard.elapsed_time.as_millis() as f32;
+                    let title = format!("{} | cpu:{:.1} ms, gpu:{:.1} ms", guard.settings.name, cpu_time, guard.renderer.gpu_frame_time);
+                    guard.window.set_title(&title);
+                }
+                app.lock().elapsed_time = now;
 
-                
+                match (builder.update) {
+                    Some(update_fn) => {
+                        let mut guard = app.lock();
+                        let mut data_guard = app_data.lock();
+                        update_fn(guard.borrow_mut(), data_guard.borrow_mut());
+                    }
+                    None => {}
+                }
+
+                dirty_swapchain = {
+                    // Some(render_fn) => {
+                        println!("here3");
+                        let future = render_fn(app.clone(), app_data.clone()).await;
+                        println!("here4");
+                        matches!(
+                            future,
+                            Err(AppRenderError::DirtySwapchain)
+                        )
+                    // }
+                    // None => false,
+                };
                 let close = async {
                     window.close_requested().wait().await;
                     true
@@ -246,42 +293,6 @@ async fn main_loop<T: 'static>(builder: AppBuilder<T>) {
                     modifiers
                 };
 
-                match (builder.window_event) {
-                    Some(event_fn) => {
-                        event_fn(&mut app, &mut app_data, &window_target);
-                    }
-                    None => {}
-                }
-
-                let main_events_cleared = async {
-                    window.redraw_requested().await;
-                    let now = now.elapsed().unwrap();
-                    if app.elapsed_ticks % 10 == 0 {
-                        let cpu_time = now.as_millis() as f32 - app.elapsed_time.as_millis() as f32;
-                        let title = format!("{} | cpu:{:.1} ms, gpu:{:.1} ms", app.settings.name, cpu_time, app.renderer.gpu_frame_time);
-                        app.window.set_title(&title);
-                    }
-                    app.elapsed_time = now;
-
-                    match (builder.update) {
-                        Some(update_fn) => {
-                            update_fn(&mut app, &mut app_data);
-                        }
-                        None => {}
-                    }
-
-                    dirty_swapchain = match (builder.render) {
-                        Some(render_fn) => {
-                            let future = render_fn(&mut app, &mut app_data);
-                            let res = future.await;
-                            matches!(
-                                res,
-                                Err(AppRenderError::DirtySwapchain)
-                            )
-                        }
-                        None => false,
-                    };
-                };
 
                 let suspend = async {
                     window_target.suspended().wait().await;
@@ -308,4 +319,5 @@ async fn main_loop<T: 'static>(builder: AppBuilder<T>) {
             }
         }
     });
+    println!("exiting")
 }

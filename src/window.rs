@@ -1,8 +1,9 @@
 use ash::{extensions::khr::Surface, vk};
+use futures::Future;
 use glam::Vec2;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use async_winit as winit;
-use winit::{event_loop::EventLoop, window::WindowBuilder, ThreadUnsafe};
+use winit::{event_loop::EventLoop, window::WindowBuilder, ThreadUnsafe, dpi::Size};
 
 
 pub struct Window {
@@ -12,20 +13,26 @@ pub struct Window {
 }
 
 impl Window {
-    pub async fn new<S: Into<String>>(
+    pub fn new<S: Into<String>>(
         width: u32,
         height: u32,
         title: S,
-    ) -> Self {
-        let window = WindowBuilder::new()
-            .with_title(title)
-            .with_inner_size(winit::dpi::LogicalSize::new(width as f64, height as f64))
-            //.with_decorations(false)
-            .build().await.unwrap();
-        Window {
-            handle: window,
-            surface_loader: None,
-            surface: None,
+    ) -> impl Future<Output = Self> {
+        println!("reee");
+        async move {
+            println!("waddup");
+            let window = WindowBuilder::new()
+                .with_title(title)
+                .with_inner_size(winit::dpi::LogicalSize::new(width as f64, height as f64))
+                .build()
+                .await
+                .unwrap();
+            println!("bruh");
+            Window {
+                handle: window,
+                surface_loader: None,
+                surface: None,
+            }
         }
     }
 
