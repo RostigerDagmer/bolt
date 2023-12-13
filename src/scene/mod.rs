@@ -6,7 +6,7 @@ use rayon::prelude::*;
 // Much of this was directly based on:
 // https://github.com/adrien-ben/gltf-viewer-rs/blob/master/model/src/mesh.rs
 
-use crate::resource::{mesh, material, skin::{Skin, VulkanSkin, Rig, RigParser}, DepthFirstIterator};
+use crate::resource::{mesh, material, skin::{Skin, VulkanSkin, Rig, RigParser}, strand::{Strands, VulkanStrands}, DepthFirstIterator, StrandVertex, Strand};
 pub use mesh::*;
 pub use material::*;
 pub mod daz;
@@ -27,6 +27,8 @@ pub struct Scene {
     pub vulkan_meshes: Vec<Box<VulkanMesh>>,
     pub skins: Vec<Skin>,
     pub vulkan_skins: Vec<VulkanSkin>,
+    pub strands: Vec<Strands>,
+    pub vulkan_strands: Vec<VulkanStrands>,
     pub materials: Vec<MaterialInfo>,
     pub rigs: Vec<RigV1<Mat4, BoneV1<Mat4>>>,
     pub material_buffer: Buffer,
@@ -68,16 +70,17 @@ fn calc_mesh_global_transform(gltf: &gltf::Document, mesh_index: usize) -> glam:
 
 
 fn load_textures_par(document: &gltf::Document, filepath: &PathBuf, context: Arc<Context>) -> Vec<Texture2d> {
-    let paths = document.images().map(|im| {
+    let paths = document.images().filter_map(|im| {
         let source = im.source();
         match source {
             gltf::image::Source::View { view, mime_type } => {
                 println!("mime_type: {:?}", mime_type);
-                panic!("loading gltf embedded textures not implemented");
+                println!("loading gltf embedded textures not implemented");
+                return None;
             }
             gltf::image::Source::Uri { uri, mime_type } => {
                 println!("mime_type: {:?}; uri: {:?}", mime_type, uri);
-                return filepath.as_path().parent().unwrap().join(PathBuf::from(uri).as_path()).as_os_str().to_os_string().into_string().unwrap() // PathBuf::from(uri).as_path();
+                return Some(filepath.as_path().parent().unwrap().join(PathBuf::from(uri).as_path()).as_os_str().to_os_string().into_string().unwrap()) // PathBuf::from(uri).as_path();
             }
         }
     })
@@ -209,7 +212,7 @@ fn load_glts(context: Arc<Context>, filepath: &PathBuf) -> Result<Scene, Box<dyn
             primitive_sections,
         );
 
-        meshes.push(mesh);
+        meshes.push(mesh.lower_lod());
     }
 
     let mut camera = None;
@@ -247,6 +250,8 @@ fn load_glts(context: Arc<Context>, filepath: &PathBuf) -> Result<Scene, Box<dyn
         vulkan_meshes,
         skins: Vec::new(),
         vulkan_skins: Vec::new(),
+        strands: Vec::new(),
+        vulkan_strands: Vec::new(),
         rigs: Vec::new(),
         materials,
         material_buffer,
@@ -264,104 +269,138 @@ fn load_daz(context: Arc<Context>, filepath: &PathBuf) -> Result<Scene, Box<dyn 
         }
     };
     // TODO: eliminate this clone
-    let rigs: Vec<RigV1<glam::Mat4, BoneV1<glam::Mat4>>> = DazRigParserV1::parse(&dsf).iter().map(|r| r.as_ref().unwrap().clone()).collect();
-    let meshes: Vec<Mesh> = dsf.geometry_library.iter().map(|geo| {
+    let rigs: Vec<RigV1<glam::Mat4, BoneV1<glam::Mat4>>> = DazRigParserV1::parse(&dsf).iter().filter(|r| r.as_ref().is_ok()).filter(|r| r.as_ref().unwrap().bones.len() > 0).map(|r| r.as_ref().unwrap().clone()).collect();
+    
+    let strand_assets = dsf.node_library.iter()
+    .filter_map(|node| {
+        // TODO: reflect http://docs.daz3d.com/doku.php/public/dson_spec/format_description/metadata/content_types/start
+        match &node.presentation {
+            Some(presentation) => {
+                match presentation.r#type.as_str() {
+                    "Follower/Hair" => {
+                        Some(
+                            dsf.geometry_library
+                                .iter()
+                                .map( |geo| {
+                                // NOTE: every line in the polyline begins with vertices [0, 1], [1, 0], [1, 1] for some reason
+                                // check if that is correct?
+                                // UPDATE: this a huge pain in the ass and we have to remove the first two entries of each polyline
+                                //      (makes at least one line segement of EVERY strand part of one tile => huge performance hit and useless waste of memory)
+                                let st = geo.polyline_list.as_ref().expect("Somehow ran into a situation where a Follower/Hair doesn't define polylines.");
 
-        // we need to go through the mesh by indices so we can be sure to only handle triangles
-        // and not quads
-        let index_buffer = geo.polylist.values.iter().fold(Vec::new(), |mut acc, quad| {
-            // reorder
-            match quad.len() {
-                5 => {
-                    acc.push(quad[2].clone());
-                    acc.push(quad[3].clone());
-                    acc.push(quad[4].clone());
-                },
-                6 => {
-                    acc.push(quad[2].clone());
-                    acc.push(quad[3].clone());
-                    acc.push(quad[4].clone());
-                    acc.push(quad[2].clone());
-                    acc.push(quad[4].clone());
-                    acc.push(quad[5].clone());
+                                let (_, strands, indices) = st.values
+                                    .iter()
+                                    .fold((0 as u32, Vec::new(), Vec::new()), |(offset_count, mut strand_acc, mut index_acc), strand| {
+                                        index_acc.extend_from_slice(&strand[2..]);
+                                        let strand_inst = Strand {
+                                            offset: offset_count,
+                                            count: (strand.len() - 2) as u32,
+                                            uv: glam::vec2(0.5, 0.5),
+                                            barycentric: glam::vec3(1.0, 1.0, 1.0),
+                                            root_radius: 0.001,
+                                            tip_radius: 0.001,
+                                            // is_simstrand: false,
+                                        };
+                                        strand_acc.push(strand_inst);
+                                        (offset_count + (strand.len() - 2) as u32, strand_acc, index_acc)
+                                    });
+                                let strand_vertices = geo.vertices.values
+                                    .iter()
+                                    .map(|v| {
+                                        StrandVertex {
+                                            position: glam::vec3(v[0], v[1], v[2]),
+                                            color: glam::vec4(1.0, 1.0, 1.0, 1.0),
+                                        }
+                                    })
+                                    .collect::<Vec<StrandVertex>>();
+                                Strands {
+                                    strands,
+                                    sim_params: Default::default(),
+                                    vertices: strand_vertices,
+                                    indices,
+                                }
+                            })
+                            .collect::<Vec<Strands>>()
+                        )
+                    }
+                    _ => { None }
                 }
-                _ => {}
-            };
-            acc
-        });
-
-        let vertices = geo.vertices.values.par_iter().map(|v| {
-            ModelVertex {
-                pos: glam::vec4(v[0], v[1], v[2], 1.0),
-                normal: glam::vec4(0.0, 0.0, 0.0, 0.0),
-                color: glam::vec4(1.0, 1.0, 1.0, 1.0),
-                uv: glam::vec4(0.0, 0.0, 0.0, 0.0),
-            }
-        }).collect::<Vec<ModelVertex>>();
-
-
-        // index_buffer.par_iter()
-        // .collect::<Vec<_>>()
-        // .windows(3)
-        // .for_each(|i| {
-        //     let v_prev = vertices[*i[0] as usize].pos;
-        //     let v = vertices[*i[1] as usize].pos;
-        //     let v_next = vertices[*i[2] as usize].pos;
-        //     let a  = v_next - v;
-        //     let b = v_prev - v;
-        //     let normal = glam::Vec4::from((a.xyz().cross(b.xyz()).normalize(), 1.0));
-        //     vertices[*i[0] as usize].normal = normal;
-        //     vertices[*i[1] as usize].normal = normal;
-        //     vertices[*i[2] as usize].normal = normal;
-        // });
-
-        // correcting normals by flipping.
-
-        // println!("{}: {} vertices", geo.name, vertices.len());
-        // println!("{}: {} faces", geo.name, index_buffer.len() / 3);
-
-        // index_buffer.par_iter()
-        // .collect::<Vec<_>>()
-        // .windows(32)
-        // .for_each(|window| {
-        //     let mut same_dir_count = 0;
-        //     let v = *window[0];
-        //     // for i in window {
-        //     //     if vertices[**i as usize].normal.dot(vertices[v as usize].normal) > 0.0 {
-        //     //         same_dir_count += 1;
-        //     //     }
-        //     // }
-        //     // if same_dir_count < (window.len() / 2) {
-        //     //     vertices[v as usize].normal = -vertices[v as usize].normal;
-        //     // }
-        //     //vertices[v as usize].normal = -vertices[v as usize].normal;
-        // });
-        
-        let sections = vec![PrimitiveSection {
-            index: 0,
-            vertices: BufferPart {
-                offset: 0,
-                element_count: vertices.len() as usize,
             },
-            indices: Some(BufferPart {
-                offset: 0,
-                element_count: index_buffer.len() as usize,
-            }),
-            material_index: Some(0),
-        }];
-        let mut mesh = Mesh::new(geo.name.clone(), vertices, index_buffer, glam::Mat4::IDENTITY, sections);
-        
-        let normals = mesh.vertex_iter()
-                .map(|vertex_id| mesh.vertex_normal(vertex_id))
-                .collect::<Vec<_>>();
-        
-        mesh.vertices.iter_mut().zip(normals).for_each(|(vertex, normal)| {
-            vertex.normal = glam::vec4(normal.x, normal.y, normal.z, 0.0);
-        });
+            None => { None }
+        }
+    })
+    .flatten()
+    .collect::<Vec<Strands>>();
 
-        mesh
+    let vulkan_strands = strand_assets.iter().map(|strands| VulkanStrands::new(context.clone(), strands)).collect();
 
-    }).collect();
+    let meshes: Vec<Mesh> = if strand_assets.len() > 0 {
+        Vec::new()
+    } else {
+        dsf.geometry_library.iter().map(|geo| {
+    
+            // we need to go through the mesh by indices so we can be sure to only handle triangles
+            // and not quads
+            let index_buffer = geo.polylist.values.iter().fold(Vec::new(), |mut acc, quad| {
+                // reorder
+                match quad.len() {
+                    5 => {
+                        acc.push(quad[2].clone());
+                        acc.push(quad[3].clone());
+                        acc.push(quad[4].clone());
+                    },
+                    6 => {
+                        acc.push(quad[2].clone());
+                        acc.push(quad[3].clone());
+                        acc.push(quad[4].clone());
+                        acc.push(quad[2].clone());
+                        acc.push(quad[4].clone());
+                        acc.push(quad[5].clone());
+                    }
+                    _ => {}
+                };
+                acc
+            });
+    
+            let vertices = geo.vertices.values.par_iter().map(|v| {
+                ModelVertex {
+                    pos: glam::vec4(v[0], v[1], v[2], 1.0),
+                    normal: glam::vec4(0.0, 0.0, 0.0, 0.0),
+                    color: glam::vec4(1.0, 1.0, 1.0, 1.0),
+                    uv: glam::vec4(0.0, 0.0, 0.0, 0.0),
+                }
+            }).collect::<Vec<ModelVertex>>();
+            
+            let sections = vec![PrimitiveSection {
+                index: 0,
+                vertices: BufferPart {
+                    offset: 0,
+                    element_count: vertices.len() as usize,
+                },
+                indices: Some(BufferPart {
+                    offset: 0,
+                    element_count: index_buffer.len() as usize,
+                }),
+                material_index: Some(0),
+            }];
+            let mut mesh = Mesh::new(geo.name.clone(), vertices, index_buffer, glam::Mat4::IDENTITY, sections);
+            
+            let normals = mesh.vertex_iter()
+                    .map(|vertex_id| mesh.vertex_normal(vertex_id))
+                    .collect::<Vec<_>>();
+            
+            mesh.vertices.iter_mut().zip(normals).for_each(|(vertex, normal)| {
+                vertex.normal = glam::vec4(normal.x, normal.y, normal.z, 0.0);
+            });
+
+            // generate lower LOD for testing.
+            // collapse 4 vertex planes into one using half-edge datastructure
+            // let lower_lod = mesh.lower_lod();
+            mesh
+    
+        }).collect()
+    };
+    
 
     // "aspectRatio": 1.7777778,
     // "yfov": 22.0,
@@ -388,21 +427,21 @@ fn load_daz(context: Arc<Context>, filepath: &PathBuf) -> Result<Scene, Box<dyn 
         &materials,
     );
     let vulkan_meshes: Vec<Box<VulkanMesh>> = meshes.iter().map(|mesh| Box::new(mesh.to_vulkan_mesh(context.clone()))).collect();
-
     let mut skins: Vec<Skin> = dsf.skins();
     skins.iter_mut().zip(rigs.iter()).for_each(|(skin, rig)| {
         skin.inverse_bind_matrices = rig.get_bones().iter().map(|bone| {
             bone.inverse_bind_matrix
         }).collect();
     });
-    let vulkan_skins = skins.iter().map(|skin| VulkanSkin::from_data(context.clone(), format!("vk_{}", skin.name), skin)).collect();
-
+    let vulkan_skins: Vec<VulkanSkin> = skins.iter().filter(|s| !s.joint_id_map.is_empty()).map(|skin| VulkanSkin::from_data(context.clone(), format!("vk_{}", skin.name), skin)).collect();
     Ok(Scene {
         meshes: meshes,
         vulkan_meshes,
         skins,
-        rigs,
         vulkan_skins,
+        strands: strand_assets,
+        vulkan_strands,
+        rigs,
         materials: materials,
         material_buffer: material_buffer,
         camera: Some(Camera::new(glam::vec2(1280.0, 720.0))),

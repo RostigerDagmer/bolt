@@ -36,7 +36,8 @@ impl Swapchain {
             }
             let pdevice = context.physical_device();
             let surface_capabilities = window.get_surface_capabilities(pdevice);
-            let mut desired_image_count = surface_capabilities.min_image_count + 1;
+            let mut desired_image_count = if surface_capabilities.min_image_count > settings.frames_in_flight as u32 { surface_capabilities.min_image_count } else { settings.frames_in_flight as u32 };
+            // println!("min image count: {}", surface_capabilities.min_image_count);
             if surface_capabilities.max_image_count > 0
                 && desired_image_count > surface_capabilities.max_image_count
             {

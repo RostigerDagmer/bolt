@@ -210,14 +210,14 @@ impl AppRenderer {
                 .device()
                 .begin_command_buffer(cmd, &begin_info)
                 .expect("Begin frame commands.");
-
+            
             self.context
                 .device()
                 .cmd_reset_query_pool(cmd, self.query_pool, 0, QUERY_POOL_SIZE);
-
-            self.context.device().cmd_write_timestamp(
+        
+            self.context.device().cmd_write_timestamp2(
                 cmd,
-                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
                 self.query_pool,
                 QUERY_BEGIN_FRAME,
             );
@@ -227,9 +227,9 @@ impl AppRenderer {
 
     pub fn end_command_buffer(&self, cmd: vk::CommandBuffer) {
         unsafe {
-            self.context.device().cmd_write_timestamp(
+            self.context.device().cmd_write_timestamp2(
                 cmd,
-                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
                 self.query_pool,
                 QUERY_END_FRAME,
             );
@@ -276,7 +276,6 @@ impl AppRenderer {
             &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
         );
         self.present_frame(rendering_complete_semaphore)?;
-
         let mut query_data = [0u32; 2];
         unsafe {
             self.context
@@ -319,7 +318,7 @@ impl AppRenderer {
             self.context
                 .device()
                 .queue_submit(
-                    self.context.graphics_queue(),
+                    self.context.present_queue(),
                     &[submit_info.build()],
                     self.frames[self.active_frame_index].in_flight_fence,
                 ).expect("queue submit error");
@@ -335,8 +334,8 @@ impl AppRenderer {
         let present_info = vk::PresentInfoKHR::builder()
             .wait_semaphores(&wait_semaphores)
             .swapchains(&swapchains)
-            .image_indices(&image_indices);
-
+            .image_indices(&image_indices)
+            .build();
         unsafe {
             let result = self
                 .swapchain
@@ -353,7 +352,6 @@ impl AppRenderer {
                 }
                 Err(error) => panic!("Error while presenting image. Cause: {}", error),
             };
-
             Ok(())
         }
     }

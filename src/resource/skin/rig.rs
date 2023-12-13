@@ -70,8 +70,6 @@ impl Transform for Mat4 {
         let sin_y = rotation.y.sin();
         let sin_z = rotation.z.sin();
 
-        println!("orientation: {:?}", orientation);
-
         let rX = glam::mat4(
             vec4(1.0, 0.0, 0.0, 0.0),
             vec4(0.0, cos_x, -sin_x, 0.0),

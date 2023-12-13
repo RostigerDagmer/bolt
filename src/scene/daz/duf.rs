@@ -144,7 +144,7 @@ structstruck::strike! {
         pub nodes: Option<Vec<SceneNode>>,
         pub materials: Option<Vec<MaterialNode>>,
         pub modifiers: Option<Vec<Value>>,
-        pub exta: Option<Vec<Value>>,
+        pub extra: Option<Vec<Value>>,
     }
 }
 
