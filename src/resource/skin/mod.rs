@@ -15,6 +15,7 @@ pub struct SkinJoint {
     pub weight: f32,
 }
 
+#[derive(Debug, Clone)]
 pub struct Skin {
     pub name: String,
     pub transforms: Vec<Mat4>,
@@ -48,7 +49,6 @@ pub struct VulkanSkin {
 impl VulkanSkin {
     // TODO: make this generic over <T: Into<Skin>>
     pub fn from_data(context: Arc<Context>, name: String, skin: &Skin) -> Self {
-
         let transforms = Buffer::from_data(
                 context.clone(),
                 BufferInfo {

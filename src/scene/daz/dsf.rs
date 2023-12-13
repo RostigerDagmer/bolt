@@ -54,8 +54,8 @@ structstruck::strike! {
         pub name: String,
         pub id_aliases: Option<Vec<String>>,
         pub r#type: String,
-        pub edge_interpolation_mode: String,
-        pub subd_normal_smoothing_mode: String,
+        pub edge_interpolation_mode: Option<String>, // should be enum
+        pub subd_normal_smoothing_mode: Option<String>, // should be enum
         pub vertices: struct {
             pub count: u32,
             pub values: Vec<[f32; 3]>,
@@ -145,13 +145,13 @@ structstruck::strike! {
         pub general_scale: Option<Handle>,
         pub formulas: Option<Vec<Formula>>,
         pub presentation: Option<pub struct {
-            r#type: String,
-            label: String,
-            description: String,
-            icon_large: String,
-            colors: Vec<Vec<f32>>,
-            auto_fit_base: String,
-            extended_bases: Option<Vec<String>>,
+            pub r#type: String, // full list here: http://docs.daz3d.com/doku.php/public/dson_spec/format_description/metadata/content_types/start
+            pub label: String,
+            pub description: String,
+            pub icon_large: String,
+            pub colors: Vec<Vec<f32>>,
+            pub auto_fit_base: Option<String>,
+            pub extended_bases: Option<Vec<String>>,
         }>,
         pub extra: Vec<Value>,
     }
@@ -190,15 +190,18 @@ structstruck::strike! {
         pub id: String,
         pub name: String,
         pub parent: String,
-        pub skin: Skin,
+        pub skin: Option<Skin>,
         pub extra: Vec<pub struct {
             r#type: String,
+            #[serde(default)]
             auto_normalize_general: bool,
+            #[serde(default)]
             auto_normalize_local: bool,
+            #[serde(default)]
             auto_normalize_scale: bool,
-            binding_mode: String,
-            general_map_mode: String,
-            scale_mode: String,
+            binding_mode: Option<String>,
+            general_map_mode: Option<String>,
+            scale_mode: Option<String>,
         }>,
     }
 }

@@ -35,10 +35,9 @@ fn radians_to_degrees(radians: Vec3) -> Vec3 {
 impl<S: Transform, T: Bone<S>> RigParser<RigV1<S, T>, S, T> for DazRigParserV1<RigV1<S, T>, S, T> {
 
     fn parse(file: &DSF) -> Vec<Result<RigV1<S,T>, Box<dyn Error>>> {
-        file.modifier_library.iter().map(|m| {
-            let joint_names = m.skin.joints.iter().map(|j| j.node.strip_prefix("#").unwrap().to_string()).collect::<HashSet<_>>();
+        file.modifier_library.iter().filter(|m| m.skin.is_some()).map(|m| {
+            let joint_names = m.skin.as_ref().unwrap().joints.iter().map(|j| j.node.strip_prefix("#").unwrap().to_string()).collect::<HashSet<_>>();
             
-            println!("joint_names: {:?}", joint_names);
             let mut bone_map: HashMap<String, usize> = HashMap::new();
             let mut children_map: HashMap<String, Vec<String>> = HashMap::new();
             let bones = file

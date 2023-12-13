@@ -44,12 +44,12 @@ impl DSF {
             .collect::<HashMap<String, Node>>();
 
         // println!("node_map: {:?}", node_map);
-        self.modifier_library.iter().map(|m| {
+        self.modifier_library.iter().filter(|m| m.skin.is_some()).map(|m| {
             let mut joints = Vec::new();
             let mut transforms = Vec::new();
             let mut bone_transforms = Vec::new();
             let mut inverse_bind_matrices = Vec::new();
-            let skin = &m.skin;
+            let skin = m.skin.as_ref().unwrap();
             let joint_id_map: HashMap<String, u32> = skin.joints
                 .iter()
                 .enumerate()

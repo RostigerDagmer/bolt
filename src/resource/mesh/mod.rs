@@ -8,7 +8,8 @@ use crate::{offset_of, Buffer, Context, Resource, Vertex, BufferInfo};
 use crate::resource::material::MaterialInfo;
 use ash::{vk};
 use glam::Vec4Swizzles;
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{HashMap, BinaryHeap};
 use std::ops::Deref;
 use std::sync::Arc;
 use rayon::prelude::*;
@@ -492,6 +493,10 @@ impl Mesh {
         self.face_direction(face_id).normalize()
     }
 
+    pub fn faces(&self) -> impl Iterator<Item = FaceID> {
+        self.connectivity_info.face_iterator()
+    }
+
     pub fn vertex_normal(&self, vertex_id: VertexID) -> glam::Vec3 {
         let mut normal = glam::Vec3::ZERO;
         for halfedge_id in self.vertex_halfedge_iter(vertex_id) {
@@ -500,6 +505,72 @@ impl Mesh {
             }
         }
         normal.normalize()
+    }
+
+    pub fn lower_lod(&self) -> Self {
+        // take a triangle and its neighbouring 3 triangles and collapse it into one triangle (3 vertices)
+        // mark all involved outer edges as collapsed and inner edges (part of the taken triangle) as removed
+        // project involved points not part of the new face onto the new triangle edges and push them to the front of a queue.
+        // should be 3 points since we just collapsed 6 vertices into 3.
+        // choose the next point part of a triangle with no collapsed edges and repeat until queue is empty.
+
+        // Create a priority queue based on the triangle's area or error metric.
+        // The priority queue will ensure that we process the largest triangles first.
+        let mut face_queue = BinaryHeap::new();
+        
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        let mut primitive_sections = Vec::new();
+        let mut vertex_map = HashMap::<VertexID, VertexID>::new();
+        
+        let mut connectivity_info = self.connectivity_info.clone();
+        
+        // Initialize the priority queue with all faces.
+        for face_id in connectivity_info.face_iterator() {
+            let area = self.compute_face_area(face_id);
+            face_queue.push(Reverse((area, face_id)));
+        }
+
+        // Begin processing faces from the queue.
+        while let Some(Reverse((_, face_id))) = face_queue.pop() {
+            // Check if current face edges have already been collapsed.
+            if should_process_face(face_id) {
+                // Identify the vertices of the current triangle.
+                let mut walker = self.walker_from_face(face_id);
+                let vertices_ids = [
+                    walker.vertex_id().unwrap(),
+                    walker.as_next().vertex_id().unwrap(),
+                    walker.as_next().vertex_id().unwrap(),
+                ];
+                
+                // Compute new midpoint vertex positions.
+                vertices.extend(vertices_ids.iter().map(|&vid| {
+                    let pos = self.vertex_position(vid);
+                    let new_pos = compute_new_vertex_position(pos);
+                    new_pos
+                }));
+                
+                // Map the new midpoint vertices to the original vertices.
+                for (i, &vid) in vertices_ids.iter().enumerate() {
+                    vertex_map.insert(vid, i as u32);
+                }
+                
+                // Replace the original triangle with a smaller one, keeping tessellation consistent.
+                indices.extend(collapsible_triangles(face_id, &vertex_map));
+                
+                // Assuming you have a method to update connectivity, update it.
+                update_connectivity_info(&mut connectivity_info, &vertex_map, face_id);
+            }
+        }
+
+        Mesh {
+            name: self.name.clone(),
+            vertices,
+            indices,
+            transform: self.transform,
+            primitive_sections,
+            connectivity_info: self.connectivity_info.clone(),
+        }
     }
 
 }
